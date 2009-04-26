@@ -86,7 +86,11 @@ src_compile() {
 
 src_install() {
 	# do not remove modules to avoid sandbox violation.
-	sed -i s/rm\(mod\+\"\.o\"\)\;/break\;/ "${S}"/bin/install.pike || die "Failed to modify install.pike"
+        # The sandbox really ought to allow deletion of files
+        # that belong to previous installs of the ebuild, or
+	# even better: hide them.
+	sed -i s/rm\(mod\+\"\.o\"\)\;/break\;/ "${S}"/bin/install.pike || die "Failed to modify install.pike (1)"
+	sed -i 's/\(Array.map *( *files_to_delete *- *files_to_not_delete, *rm *);\)/; \/\/ \1/' "${S}"/bin/install.pike || die "Failed to modify install.pike (2)"
 	if use doc ; then
 		make INSTALLARGS="--traditional" buildroot="${D}" install || die
 		einfo "Installing 60MB of docs, this could take some time ..."
