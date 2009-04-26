@@ -1,0 +1,4 @@
+# Don't install a snapshot build by mistake.
+=dev-lang/pike-7.8.9999
+=dev-lang/pike-7.6.9999
+=dev-lang/pike-7.4.9999
