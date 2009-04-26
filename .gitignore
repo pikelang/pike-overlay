@@ -1,0 +1,7 @@
+*.swp
+*~
+*.bak
+*.old
+*.rej
+*.orig
+.nfs*

@@ -1,15 +1,16 @@
 # Copyright 1999-2008 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
-# $Header: /var/cvsroot/gentoo-x86/dev-lang/pike/pike-7.6.112.ebuild,v 1.1 2008/02/28 08:27:12 araujo Exp $
+# $Header$
 
+EAPI="2"
 DESCRIPTION="Pike programming language and runtime"
 HOMEPAGE="http://pike.ida.liu.se/"
 SRC_URI="http://pike.ida.liu.se/pub/pike/all/${PV}/Pike-v${PV}.tar.gz"
 
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0"
-KEYWORDS="~amd64 ~ppc ~x86 ~x86-fbsd"
-IUSE="bzip2 debug doc fftw gdbm gtk hardened jpeg kerberos mime mysql opengl pcre pdf scanner sdl ssl svg tiff truetype zlib"
+KEYWORDS="~alpha ~amd64 ~hppa ~ia64 ~mips ~ppc ~sparc ~x86 ~x86-fbsd"
+IUSE="bzip2 debug doc fftw gdbm gtk hardened jpeg kerberos mime mysql opengl pcre pdf scanner sdl svg tiff truetype zlib"
 
 DEPEND="dev-libs/nettle
 	dev-libs/gmp
@@ -26,7 +27,6 @@ DEPEND="dev-libs/nettle
 	pdf? ( media-libs/pdflib )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
 	sdl? ( media-libs/libsdl media-libs/sdl-mixer )
-	ssl? ( dev-libs/openssl )
 	svg? ( gnome-base/librsvg )
 	tiff? ( media-libs/tiff )
 	truetype? ( media-libs/freetype )
@@ -51,6 +51,7 @@ src_compile() {
 			--without-cdebug \
 			--without-bundles \
 			--without-copt \
+			--without-ssleay \
 			--with-crypt \
 			--with-gif \
 			--with-gmp \
@@ -70,15 +71,13 @@ src_compile() {
 			$(use_with scanner sane) \
 			$(use_with sdl SDL) \
 			$(use_with sdl SDL_mixer) \
-			$(use_with ssl ssleay) \
 			$(use_with svg) \
 			$(use_with tiff tifflib) \
 			$(use_with truetype ttflib) \
 			$(use_with truetype freetype) \
 			$(use_with zlib) \
 			${myconf} \
-			${EXTRA_ECONF} \
-			" || die
+			" || die "compilation failed"
 
 	if use doc; then
 		PATH="${S}/bin:${PATH}" make doc || die "doc failed"
@@ -95,4 +94,8 @@ src_install() {
 	else
 		make INSTALLARGS="--traditional" buildroot="${D}" install_nodoc || die
 	fi
+	# Installation is a bit broken.. remove the doc sources.
+	rm -rf "${D}/usr/doc"
+	# Install the man pages in the proper location.
+	rm -rf "${D}/usr/man" && doman "${S}/man/pike.1"
 }
