@@ -11,7 +11,7 @@ SRC_URI="http://pike.ida.liu.se/generated/pikefarm/packages/devel/latest -> Pike
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0"
 KEYWORDS="~alpha ~amd64 ~hppa ~ia64 ~mips ~ppc ~sparc ~x86 ~x86-fbsd"
-IUSE="bzip2 debug doc fftw gdbm gtk hardened jpeg kerberos mime mysql opengl pcre pdf scanner sdl svg tiff truetype zlib"
+IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl pcre pdf scanner sdl sqlite svg tiff truetype zlib"
 
 DEPEND="dev-libs/nettle
 	dev-libs/gmp
@@ -19,18 +19,25 @@ DEPEND="dev-libs/nettle
 	bzip2? ( app-arch/bzip2 )
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
-	gtk? ( =x11-libs/gtk+-1.2* )
+	gtk? ( =x11-libs/gtk+-1.2* >x11-libs/gtk+-2 )
+	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/gnome-applets gnome-base/libglade ) )
+	gtk? ( opengl? ( x11-libs/gtkglarea ) )
+	java? ( virtual/jdk dev-libs/libffi )
 	jpeg? ( media-libs/jpeg )
-	kerberos? ( virtual/krb5 )
+	kerberos? ( virtual/krb5 net-libs/libgssglue )
+	msql? ( dev-db/msql )
 	mysql? ( virtual/mysql )
-	opengl? ( virtual/opengl virtual/glut )
+	odbc? ( dev-db/libiodbc )
+	opengl? ( virtual/opengl glut? ( virtual/glut ) )
 	pcre? ( dev-libs/libpcre )
 	pdf? ( media-libs/pdflib )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
 	sdl? ( media-libs/libsdl media-libs/sdl-mixer )
+	sqlite? ( dev-db/sqlite )
 	svg? ( gnome-base/librsvg )
+	test? ( sys-devel/m4 )
 	tiff? ( media-libs/tiff )
-	truetype? ( media-libs/freetype )
+	truetype? ( >media-libs/freetype-2 )
 	zlib? ( sys-libs/zlib )"
 RDEPEND=""
 
@@ -62,12 +69,16 @@ src_compile() {
 			$(use_with debug rtldebug) \
 			$(use_with fftw) \
 			$(use_with gdbm) \
+			$(use_with java Java) \
 			$(use_with jpeg jpeglib) \
 			$(use_with kerberos Kerberos) \
-			$(use_with mime MIME) \
+			$(use_with kerberos gssapi) \
+			$(use_with msql) \
 			$(use_with mysql) \
+			$(use_with odbc Odbc) \
 			$(use_with opengl GL) \
-			$(use_with opengl GLUT) \
+			$(use opengl && use_with glut GLUT) \
+			$(use opengl || use_with opengl GLUT) \
 			$(use_with pcre _Regexp_PCRE) \
 			$(use_with pdf libpdf) \
 			$(use_with scanner sane) \
@@ -75,7 +86,6 @@ src_compile() {
 			$(use_with sdl SDL_mixer) \
 			$(use_with svg) \
 			$(use_with tiff tifflib) \
-			$(use_with truetype ttflib) \
 			$(use_with truetype freetype) \
 			$(use_with zlib) \
 			${myconf} \
