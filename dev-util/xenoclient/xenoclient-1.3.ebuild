@@ -15,18 +15,21 @@ IUSE=""
 DEPEND="net-misc/wget"
 RDEPEND=""
 
+S=${WORKDIR}/xenoclient
+
 src_compile() {
-  cd xenoclient && make
+  make
 }
 
 src_install() {
-  mkdir -p "$D/etc/xenofarm"
-  (cd xenoclient/config && tar cf - .) | \
-    (cd "$D/etc/xenoclient" && tar xf -) || die
-  rm -rf xenoclient/config || die
-  mkdir -p "$D/usr"
-  tar cf - xenoclient | (cd "$D/usr" && tar xf -) || die
-  ln -s /etc/xenoclient "$D/usr/xenoclient/config" || die  
+  mkdir -p "$D/etc/xenoclient"
+  (cd config && tar cf - .) | \
+    (cd "$D/etc/xenoclient" && tar xf -) || die "Failed to copy config files."
+  rm -rf config || die "Failed to clean up."
+  mkdir -p "$D/usr/xenoclient"
+  tar cf - . | (cd "$D/usr/xenoclient" && tar xf -) || die "Failed to install."
+  ln -s /etc/xenoclient "$D/usr/xenoclient/config" || \
+    die "Failed to install config directory."
 
   if [ -f /etc/xenoclient/contact.txt ]; then :; else
     elog "Please run /usr/xenoclient/client.sh once interactively"
