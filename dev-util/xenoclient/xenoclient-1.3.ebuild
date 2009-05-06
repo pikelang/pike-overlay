@@ -20,12 +20,13 @@ src_compile() {
 }
 
 src_install() {
-  test -d /etc/xenofarm || mkdir /etc/xenofarm
-  (cd xenoclient/config && tar cf - .) | (cd /etc/xenoclient && tar xf -) || die
+  mkdir -p "$D/etc/xenofarm"
+  (cd xenoclient/config && tar cf - .) | \
+    (cd "$D/etc/xenoclient" && tar xf -) || die
   rm -rf xenoclient/config || die
-  tar cf - xenoclient | (cd /usr && tar xf -) || die
-  test -d /usr/xenoclient/config/. || \
-    ln -s /etc/xenoclient /usr/xenoclient/config || die  
+  mkdir -p "$D/usr"
+  tar cf - xenoclient | (cd "$D/usr" && tar xf -) || die
+  ln -s /etc/xenoclient "$D/usr/xenoclient/config" || die  
 
   if [ -f /etc/xenoclient/contact.txt ]; then :; else
     elog "Please run /usr/xenoclient/client.sh once interactively"
