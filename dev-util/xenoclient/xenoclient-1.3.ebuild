@@ -18,7 +18,8 @@ RDEPEND=""
 S=${WORKDIR}/xenoclient
 
 src_compile() {
-  make
+  econf || die
+  emake || die "Failed to build put."
 }
 
 src_install() {
