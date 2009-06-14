@@ -2,6 +2,12 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header: /var/cvsroot/gentoo-x86/dev-lang/pike/ChangeLog,v 1.33 2008/11/27 23:14:01 araujo Exp $
 
+*pike-7.8.300 (14 Jun 2009)
+*pike-7.8.296 (14 Jun 2009)
+*pike-7.8.292 (14 Jun 2009)
+  15 Jun 2009; Henrik Grubbström <grubba@grubba.org> +pike-7.8.292.ebuild,
+  +pike-7.8.296.ebuild, +pike-7.8.300.ebuild: Added the latest betas.
+
 *pike-7.8.116 (26 Apr 2009)
 
   26 Apr 2009; Henrik Grubbström <grubba@grubba.org> +pike-7.8.116.ebuild:
