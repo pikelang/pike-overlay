@@ -2,6 +2,11 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header: /var/cvsroot/gentoo-x86/dev-lang/pike/ChangeLog,v 1.33 2008/11/27 23:14:01 araujo Exp $
 
+  26 Jun 2009; Henrik Grubbström <grubba@grubba.org> +pike-7.8.116-r1.ebuild,
+  +pike-7.8.292-r1.ebuild, +pike-7.8.296-r1.ebuild, +pike-7.8.300-r1.ebuild,
+  +pike-7.8.304-r1.ebuild, +pike-7.8.306-r1.ebuild: Depend on virtual/libffi
+  rather than dev-libs/libffi.
+	
 *pike-7.8.306 (21 Jun 2009)
 
   21 Jun 2009; Henrik Grubbström <grubba@grubba.org> +pike-7.8.306.ebuild:
