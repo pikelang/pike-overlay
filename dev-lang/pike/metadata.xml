@@ -3,8 +3,8 @@
 <pkgmetadata>
 <herd>no-herd</herd>
 <maintainer>
-	<email>araujo@gentoo.org</email>
-	<name>Luis F. Araujo</name>
+	<email>grubba@grubba.org</email>
+	<name>Henrik Grubbström</name>
 </maintainer>
 <longdescription lang="en">
 Pike is a dynamic programming language with a syntax similar to Java and C. It
