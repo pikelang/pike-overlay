@@ -2,3 +2,5 @@
 =dev-lang/pike-7.8.9999
 =dev-lang/pike-7.6.9999
 =dev-lang/pike-7.4.9999
+# Nettle 2.x not yet supported (due to yarrow seed_file).
+>=dev-libs/nettle-2.0
