@@ -5,11 +5,11 @@
 EAPI="2"
 DESCRIPTION="Pike programming language and runtime"
 HOMEPAGE="http://pike.ida.liu.se/"
-SRC_URI="http://pike.ida.liu.se/pub/pike/beta/${PV}/Pike-v${PV}.tar.gz"
+SRC_URI="http://pike.ida.liu.se/pub/pike/all/${PV}/Pike-v${PV}.tar.gz"
 
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0"
-KEYWORDS="~alpha ~amd64 ~hppa ~ia64 ~mips ~ppc ~sparc ~x86 ~x86-fbsd"
+KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl pcre pdf scanner sdl sqlite svg tiff truetype zlib"
 
 DEPEND="<dev-libs/nettle-2
