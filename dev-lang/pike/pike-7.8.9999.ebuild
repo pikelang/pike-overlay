@@ -59,7 +59,6 @@ src_compile() {
 			--disable-noopty-retry \
 			--without-cdebug \
 			--without-bundles \
-			--without-copt \
 			--without-ssleay \
 			--with-crypt \
 			--with-gif \

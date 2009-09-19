@@ -4,6 +4,9 @@
 
 *pike-7.8.346 (14 Sep 2009)
 
+  19 Set 2009; Henrik Grubbström <grubba@grubba.org> pike-7.8.346-r1.ebuild
+  pike-7.8.9999.ebuild: Removed use of --without-copt.
+
   14 Sep 2009; Henrik Grubbström <grubba@grubba.org> pike-7.8.346.ebuild:
   Added the latest beta.
 
