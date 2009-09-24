@@ -2,6 +2,11 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header: /var/cvsroot/gentoo-x86/dev-lang/pike/ChangeLog,v 1.33 2008/11/27 23:14:01 araujo Exp $
 
+*pike-7.8.352 (24 Sep 2009)
+
+  24 Sep 2009; Henrik Grubbström <grubba@grubba.org> pike-7.8.352.ebuild:
+  Added the latest stable.
+
 *pike-7.8.350 (20 Sep 2009)
 
   20 Sep 2009; Henrik Grubbström <grubba@grubba.org> pike-7.8.350.ebuild:
