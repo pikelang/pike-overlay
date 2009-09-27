@@ -1,0 +1,4564 @@
+diff --git a/Makefile b/Makefile
+index 2bbc374..ce49163 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,7 @@
+ MAJOR=2
+ MINOR=2b1
+ CC?=gcc
+-CFLAGS?=-g -O2 -Wall 
++CFLAGS?=-g -Wall
+ CFLAGS+=-I. -DVERSION=\"$(MAJOR).$(MINOR)\"
+ prefix?=/usr/local
+ OBJS=\
+diff --git a/cache.c b/cache.c
+index 4c51cf7..04660ef 100644
+--- a/cache.c
++++ b/cache.c
+@@ -3,6 +3,7 @@
+  * See COPYING file for license information 
+  */
+ 
++#include <assert.h>
+ #include <stdio.h>
+ #include <search.h>
+ #include <string.h>
+@@ -12,6 +13,8 @@
+ #include <ctype.h>
+ #include <time.h>
+ 
++#include <zlib.h>
++
+ #include <cbtcommon/hash.h>
+ #include <cbtcommon/debug.h>
+ 
+@@ -23,23 +26,23 @@
+ #define CACHE_DESCR_BOUNDARY "-=-END CVSPS DESCR-=-\n"
+ 
+ /* change this when making the on-disk cache-format invalid */
+-static int cache_version = 1;
++static int cache_version = 2;
+ 
+ /* the tree walk API pretty much requries use of globals :-( */
+-static FILE * cache_fp;
++static gzFile cache_fp;
+ static int ps_counter;
+ 
+ static void write_patch_set_to_cache(PatchSet *);
+ static void parse_cache_revision(PatchSetMember *, const char *);
+-static void dump_patch_set(FILE *, PatchSet *);
++static void dump_patch_set(gzFile, PatchSet *);
+ 
+-static FILE *cache_open(char const *mode)
++static gzFile cache_open(char const *mode)
+ {
+     char *prefix;
+     char fname[PATH_MAX];
+     char root[PATH_MAX];
+     char repository[PATH_MAX];
+-    FILE * fp;
++    gzFile fp;
+ 
+     /* Get the prefix */
+     prefix = get_cvsps_dir();
+@@ -55,9 +58,10 @@ static FILE *cache_open(char const *mode)
+ 
+     snprintf(fname, PATH_MAX, "%s/%s#%s", prefix, root, repository);
+     
+-    if (!(fp = fopen(fname, mode)) && *mode == 'r')
++    if (!(fp = gzopen(fname, mode)))
+     {
+-	if ((fp = fopen("CVS/cvsps.cache", mode)))
++	FILE * fd;
++	if (*mode == 'r' && (fd = fopen("CVS/cvsps.cache", mode)))
+ 	{
+ 	    fprintf(stderr, "\n");
+ 	    fprintf(stderr, "****WARNING**** Obsolete CVS/cvsps.cache file found.\n");
+@@ -66,9 +70,11 @@ static FILE *cache_open(char const *mode)
+ 	    fprintf(stderr, "                Please manually remove the old file.\n");
+ 	    fprintf(stderr, "                Continuing in 5 seconds.\n");
+ 	    sleep(5);
+-	    fclose(fp);
+-	    fp = NULL;
++	    fclose(fd);
++	    fd = NULL;
+ 	}
++	if (*mode == 'w')
++	    debug(DEBUG_SYSERROR, "can't open cache file %s for write", fname);
+     }
+ 
+     return fp;
+@@ -82,64 +88,85 @@ enum
+     CACHE_NEED_BRANCHES,
+     CACHE_NEED_SYMBOLS,
+     CACHE_NEED_REV,
++    CACHE_NEED_REV_BRANCHES,
+     CACHE_NEED_PS,
+     CACHE_NEED_PS_DATE,
++    CACHE_NEED_PS_CMP_DATE,
+     CACHE_NEED_PS_AUTHOR,
+-    CACHE_NEED_PS_TAG,
+-    CACHE_NEED_PS_TAG_FLAGS,
+     CACHE_NEED_PS_BRANCH,
+-    CACHE_NEED_PS_BRANCH_ADD,
+     CACHE_NEED_PS_DESCR,
+     CACHE_NEED_PS_EOD,
+     CACHE_NEED_PS_MEMBERS,
+     CACHE_NEED_PS_EOM
+ };
+ 
+-time_t read_cache()
++time_t read_cache(int expected_mode)
+ {
+-    FILE * fp;
++    gzFile fp;
+     char buff[BUFSIZ];
+     int state = CACHE_NEED_FILE;
+     CvsFile * f = NULL;
+     PatchSet * ps = NULL;
+     char datebuff[20] = "";
++    struct timeval cmp_date;
+     char authbuff[AUTH_STR_MAX] = "";
+-    char tagbuff[LOG_STR_MAX] = "";
+-    int tag_flags = 0;
+     char branchbuff[LOG_STR_MAX] = "";
+-    int branch_add = 0;
+-    char logbuff[LOG_STR_MAX] = "";
++    int logbufflen = LOG_STR_MAX + 1;
++    char * logbuff = malloc(logbufflen);
+     time_t cache_date = -1;
+     int read_version;
+ 
+-    if (!(fp = cache_open("r")))
++    if (logbuff == NULL)
++    {
++	debug(DEBUG_SYSERROR, "could not malloc %d bytes for logbuff in read_cache", logbufflen);
++	exit(1);
++    }
++
++    logbuff[0] = 0;
++
++    if (!(fp = cache_open("rb")))
+ 	goto out;
+ 
+     /* first line is cache version  format "cache version: %d\n" */
+-    if (!fgets(buff, BUFSIZ, fp) || strncmp(buff, "cache version:", 14))
++    if (!gzgets(fp, buff, BUFSIZ) || strncmp(buff, "cache version:", 14))
+     {
+-	debug(DEBUG_APPERROR, "bad cvsps.cache file");
++	debug(DEBUG_APPERROR, "bad cache file");
+ 	goto out_close;
+     }
+ 
+     if ((read_version = atoi(buff + 15)) != cache_version)
+     {
+-	debug(DEBUG_APPERROR, "bad cvsps.cache version %d, expecting %d.  ignoring cache",
++	debug(DEBUG_APPERROR, "bad cache version %d, expecting %d.  ignoring cache",
+ 	      read_version, cache_version);
+ 	goto out_close;
+     }
+ 
+-    /* second line is date cache was created, format "cache date: %d\n" */
+-    if (!fgets(buff, BUFSIZ, fp) || strncmp(buff, "cache date:", 11))
++    /* Second line is the mode. It's an integer that must match
++     * expected_mode, which is used to ensure cache/arguments consistency. */
++    if (!gzgets(fp, buff, BUFSIZ) || strncmp(buff, "cache mode:", 11))
++    {
++	debug(DEBUG_APPERROR, "bad cache file");
++	goto out_close;
++    }
++
++    if (atoi(buff + 12) != expected_mode)
++    {
++	debug(DEBUG_APPERROR, "The cache has been written in a "
++	      "different mode and cannot be used.");
++	goto out_close;
++    }
++
++    /* Third line is date cache was created, format "cache date: %d\n" */
++    if (!gzgets(fp, buff, BUFSIZ) || strncmp(buff, "cache date:", 11))
+     {
+-	debug(DEBUG_APPERROR, "bad cvsps.cache file");
++	debug(DEBUG_APPERROR, "bad cache file");
+ 	goto out_close;
+     }
+ 
+-    cache_date = atoi(buff + 12);
++    cache_date = atol(buff + 12);
+     debug(DEBUG_STATUS, "read cache_date %d", (int)cache_date);
+ 
+-    while (fgets(buff, BUFSIZ, fp))
++    while (gzgets(fp, buff, BUFSIZ))
+     {
+ 	int len = strlen(buff);
+ 
+@@ -148,12 +175,15 @@ time_t read_cache()
+ 	case CACHE_NEED_FILE:
+ 	    if (strncmp(buff, "file:", 5) == 0)
+ 	    {
+-		len -= 6;
++		char * p = strchr(buff + 6, ' ');
++		buff[len - 1] = 0;
++		*p++ = 0;
+ 		f = create_cvsfile();
+-		f->filename = xstrdup(buff + 6);
+-		f->filename[len-1] = 0; /* Remove the \n at the end of line */
++		f->filename = xstrdup(p);
+ 		debug(DEBUG_STATUS, "read cache filename '%s'", f->filename);
+ 		put_hash_object_ex(file_hash, f->filename, f, HT_NO_KEYCOPY, NULL, NULL);
++		if (buff[6])
++		    f->default_branch_rev = get_string(buff + 6);
+ 		state = CACHE_NEED_BRANCHES;
+ 	    }
+ 	    else
+@@ -169,10 +199,20 @@ time_t read_cache()
+ 		tag = strchr(buff, ':');
+ 		if (tag)
+ 		{
++		    char * vendor_flag;
++		    int is_vendor_branch = 0;
+ 		    *tag = 0;
+ 		    tag += 2;
+ 		    buff[len - 1] = 0;
+-		    cvs_file_add_branch(f, buff, tag);
++
++		    vendor_flag = strchr(tag, ' ');
++		    if (vendor_flag)
++		    {
++			*vendor_flag = 0;
++			is_vendor_branch = vendor_flag[1] == 'v';
++		    }
++
++		    cvs_file_add_branch(f, buff, tag, is_vendor_branch);
+ 		}
+ 	    }
+ 	    else
+@@ -184,15 +224,17 @@ time_t read_cache()
+ 	case CACHE_NEED_SYMBOLS:
+ 	    if (buff[0] != '\n')
+ 	    {
+-		char * rev;
++		char * rev, * p;
+ 
+ 		rev = strchr(buff, ':');
+-		if (rev)
++		p = rev ? strchr(rev + 2, ' ') : NULL;
++		if (p)
+ 		{
+ 		    *rev = 0;
+ 		    rev += 2;
++		    *p++ = 0;
+ 		    buff[len - 1] = 0;
+-		    cvs_file_add_symbol(f, rev, buff);
++		    cvs_file_add_symbol(f, rev, p, buff);
+ 		}
+ 	    }
+ 	    else
+@@ -203,18 +245,94 @@ time_t read_cache()
+ 	case CACHE_NEED_REV:
+ 	    if (isdigit(buff[0]))
+ 	    {
++		CvsFileRevision * rev;
+ 		char * p = strchr(buff, ' ');
+-		if (p)
++		char * p2 = p ? strchr(p + 1, ' ') : NULL;
++		int ord, state, vbj, chars;
++		buff[len-1] = 0;
++		if (!p || !p2 || sscanf(p2 + 1, "%d %d %d%n", &ord, &state, &vbj, &chars) < 2)
++		{
++		    debug(DEBUG_APPERROR, "malformed revision line in cache");
++		    break;
++		}
++		*p++ = 0;
++		*p2++ = 0;
++		rev = cvs_file_add_revision(f, buff, p);
++		rev->ord = ord;
++		switch (state)
+ 		{
+-		    CvsFileRevision * rev;
++		    case -1: rev->dead = 1; break;
++		    case 0: rev->empty_commit = 1; break;
++		    case 1: break;
++		    default:
++			debug(DEBUG_APPERROR, "malformed revision line in cache");
++			break;
++		}
++		rev->vendor_branch_joined = vbj;
++		p2 += chars;
++		if (*p2)
++		{
++		    CvsFileRevision * orig = file_get_revision(f, buff, p2 + 1);
++		    rev->copy_of = orig;
++		    orig->copied_to = rev;
++		}
++	    }
++	    else
++	    {
++		state = CACHE_NEED_REV_BRANCHES;
++	    }
++	    break;
++	case CACHE_NEED_REV_BRANCHES:
++	    if (!strncmp(buff, "branches ", 9))
++	    {
++		CvsFileRevision * rev = NULL;
++		char * r = buff + 9;
++		char * b = strchr(r, ' ');
++		char * p = b ? strchr(b, ':') : NULL;
++		buff[len-1] = 0;
++
++		if (b && p)
++		{
++		    *b++ = 0;
+ 		    *p++ = 0;
+-		    buff[len-1] = 0;
+-		    rev = cvs_file_add_revision(f, buff);
+-		    if (strcmp(rev->branch, p) != 0)
++		    rev = file_get_revision(f, r, b);
++		}
++
++		if (!rev)
++		{
++		    debug(DEBUG_APPERROR, "malformed branches line in cache");
++		    break;
++		}
++
++		rev->branches = create_hash_table(3);
++
++		while (p[0])
++		{
++		    CvsFileRevision * branched_rev = NULL;
++		    p++;
++		    b = strchr(p, ';');
++		    if (b)
+ 		    {
+-			debug(DEBUG_APPERROR, "branch mismatch for %s:%s %s != %s", 
+-			      rev->file->filename, rev->rev, rev->branch, p);
++			*b++ = 0;
++			r = strchr(p, ' ');
++			if (!r)
++			    branched_rev = NO_REVISION;
++			else
++			{
++			    *r++ = 0;
++			    branched_rev = file_get_revision(f, r, p);
++			}
+ 		    }
++		    if (!branched_rev)
++		    {
++			debug(DEBUG_APPERROR, "malformed branches line in cache");
++			break;
++		    }
++		    put_hash_object_ex(rev->branches, get_string(p), branched_rev, HT_NO_KEYCOPY, NULL, NULL);
++		    debug(DEBUG_STATUS, "rev %s on %s got subbranch %s with rev %s",
++			  rev->rev, rev->branch, p,
++			  branched_rev == NO_REVISION ? "-" : branched_rev->rev);
++		    p = b;
+ 		}
+ 	    }
+ 	    else
+@@ -232,6 +350,18 @@ time_t read_cache()
+ 		/* remove prefix "date: " and LF from len */
+ 		len -= 6;
+ 		strzncpy(datebuff, buff + 6, MIN(len, sizeof(datebuff)));
++		state = CACHE_NEED_PS_CMP_DATE;
++	    }
++	    break;
++	case CACHE_NEED_PS_CMP_DATE:
++	    if (strncmp(buff, "cmp_date:", 9) == 0)
++	    {
++		char * p;
++		/* remove prefix "cmp_date: " and LF from len */
++		len -= 10;
++		cmp_date.tv_sec = atoi(buff + 10);
++		p = strchr(buff + 10, '.');
++		cmp_date.tv_usec = atoi(p + 1);
+ 		state = CACHE_NEED_PS_AUTHOR;
+ 	    }
+ 	    break;
+@@ -241,24 +371,6 @@ time_t read_cache()
+ 		/* remove prefix "author: " and LF from len */
+ 		len -= 8;
+ 		strzncpy(authbuff, buff + 8, MIN(len, AUTH_STR_MAX));
+-		state = CACHE_NEED_PS_TAG;
+-	    }
+-	    break;
+-	case CACHE_NEED_PS_TAG:
+-	    if (strncmp(buff, "tag:", 4) == 0)
+-	    {
+-		/* remove prefix "tag: " and LF from len */
+-		len -= 5;
+-		strzncpy(tagbuff, buff + 5, MIN(len, LOG_STR_MAX));
+-		state = CACHE_NEED_PS_TAG_FLAGS;
+-	    }
+-	    break;
+-	case CACHE_NEED_PS_TAG_FLAGS:
+-	    if (strncmp(buff, "tag_flags:", 10) == 0)
+-	    {
+-		/* remove prefix "tag_flags: " and LF from len */
+-		len -= 11;
+-		tag_flags = atoi(buff + 11);
+ 		state = CACHE_NEED_PS_BRANCH;
+ 	    }
+ 	    break;
+@@ -268,15 +380,6 @@ time_t read_cache()
+ 		/* remove prefix "branch: " and LF from len */
+ 		len -= 8;
+ 		strzncpy(branchbuff, buff + 8, MIN(len, LOG_STR_MAX));
+-		state = CACHE_NEED_PS_BRANCH_ADD;
+-	    }
+-	    break;
+-	case CACHE_NEED_PS_BRANCH_ADD:
+-	    if (strncmp(buff, "branch_add:", 11) == 0)
+-	    {
+-		/* remove prefix "branch_add: " and LF from len */
+-		len -= 12;
+-		branch_add = atoi(buff + 12);
+ 		state = CACHE_NEED_PS_DESCR;
+ 	    }
+ 	    break;
+@@ -287,20 +390,24 @@ time_t read_cache()
+ 	case CACHE_NEED_PS_EOD:
+ 	    if (strcmp(buff, CACHE_DESCR_BOUNDARY) == 0)
+ 	    {
+-		debug(DEBUG_STATUS, "patch set %s %s %s %s", datebuff, authbuff, logbuff, branchbuff);
+-		ps = get_patch_set(datebuff, logbuff, authbuff, branchbuff, NULL);
+-		/* the tag and tag_flags will be assigned by the resolve_global_symbols code 
+-		 * ps->tag = (strlen(tagbuff)) ? get_string(tagbuff) : NULL;
+-		 * ps->tag_flags = tag_flags;
+-		 */
+-		ps->branch_add = branch_add;
+ 		state = CACHE_NEED_PS_MEMBERS;
+ 	    }
+ 	    else
+ 	    {
+ 		/* Make sure we have enough in the buffer */
+-		if (strlen(logbuff)+strlen(buff)<LOG_STR_MAX)
+-		    strcat(logbuff, buff);
++		int len = strlen(buff);
++		if (strlen(logbuff) + len >= LOG_STR_MAX)
++		{
++		    logbufflen += (len >= LOG_STR_MAX ? (len+1) : LOG_STR_MAX);
++		    char * newlogbuff = realloc(logbuff, logbufflen);
++		    if (newlogbuff == NULL)
++		    {
++			debug(DEBUG_SYSERROR, "could not realloc %d bytes for logbuff in read_cache", logbufflen);
++			exit(1);
++		    }
++		    logbuff = newlogbuff;
++		}
++		strcat(logbuff, buff);
+ 	    }
+ 	    break;
+ 	case CACHE_NEED_PS_MEMBERS:
+@@ -312,26 +419,35 @@ time_t read_cache()
+ 	    {
+ 		datebuff[0] = 0;
+ 		authbuff[0] = 0;
+-		tagbuff[0] = 0;
+-		tag_flags = 0;
+ 		branchbuff[0] = 0;
+-		branch_add = 0;
+ 		logbuff[0] = 0;
++		ps = NULL;
+ 		state = CACHE_NEED_PS;
+ 	    }
+ 	    else
+ 	    {
+ 		PatchSetMember * psm = create_patch_set_member();
+ 		parse_cache_revision(psm, buff);
+-		patch_set_add_member(ps, psm);
++		if (!ps)
++		{
++		    time_t rev_date;
++		    convert_date(&rev_date, datebuff);
++		    debug(DEBUG_STATUS, "patch set %s %s %s %s %ld.%ld", datebuff, authbuff, logbuff, branchbuff, cmp_date.tv_sec, cmp_date.tv_usec);
++		    ps = get_patch_set(rev_date, logbuff, authbuff, branchbuff, psm, &cmp_date);
++		}
++		else
++		{
++		    patch_set_add_member(ps, psm);
++		}
+ 	    }
+ 	    break;
+ 	}
+     }
+ 
+  out_close:
+-    fclose(fp);
++    gzclose(fp);
+  out:
++    free(logbuff);
+     return cache_date;
+ }
+ 
+@@ -340,20 +456,20 @@ enum
+     CR_FILENAME,
+     CR_PRE_REV,
+     CR_POST_REV,
+-    CR_DEAD,
++    CR_DATE,
+     CR_BRANCH_POINT
+ };
+ 
+ static void parse_cache_revision(PatchSetMember * psm, const char * p_buff)
+ {
+     /* The format used to generate is:
+-     * "file:%s; pre_rev:%s; post_rev:%s; dead:%d; branch_point:%d\n"
++     * "file:%s; pre_rev:%s; post_rev:%s; date:%ld; branch_point:%d\n"
+      */
+     char filename[PATH_MAX];
+-    char pre[REV_STR_MAX];
+-    char post[REV_STR_MAX];
+-    int dead = 0;
++    char pre[REV_STR_MAX], pre_branch[REV_STR_MAX];
++    char post[REV_STR_MAX], post_branch[REV_STR_MAX];
+     int bp = 0;
++    long date = 0;
+     char buff[BUFSIZ];
+     int state = CR_FILENAME;
+     const char *s;
+@@ -363,7 +479,16 @@ static void parse_cache_revision(PatchSetMember * psm, const char * p_buff)
+ 
+     while ((s = strsep(&p, ";")))
+     {
+-	char * c = strchr(s, ':');
++	char * c = strchr(s, ':'), * c2;
++
++	if (c && (state == CR_PRE_REV || state == CR_POST_REV))
++	{
++	    c2 = strchr(c + 1, ' ');
++	    if (!c2)
++		c = NULL;
++	    else
++		*c2++ = 0;
++	}
+ 
+ 	if (!c)
+ 	{
+@@ -380,12 +505,14 @@ static void parse_cache_revision(PatchSetMember * psm, const char * p_buff)
+ 	    break;
+ 	case CR_PRE_REV:
+ 	    strcpy(pre, c);
++	    strcpy(pre_branch, c2);
+ 	    break;
+ 	case CR_POST_REV:
+ 	    strcpy(post, c);
++	    strcpy(post_branch, c2);
+ 	    break;
+-	case CR_DEAD:
+-	    dead = atoi(c);
++	case CR_DATE:
++	    date = atol(c);
+ 	    break;
+ 	case CR_BRANCH_POINT:
+ 	    bp = atoi(c);
+@@ -402,9 +529,9 @@ static void parse_cache_revision(PatchSetMember * psm, const char * p_buff)
+ 	exit(1);
+     }
+ 
+-    psm->pre_rev = file_get_revision(psm->file, pre);
+-    psm->post_rev = file_get_revision(psm->file, post);
+-    psm->post_rev->dead = dead;
++    psm->pre_rev = file_get_revision(psm->file, pre, pre_branch);
++    psm->post_rev = file_get_revision(psm->file, post, post_branch);
++    psm->date = date;
+     psm->post_rev->post_psm = psm;
+ 
+     if (!bp)
+@@ -412,47 +539,51 @@ static void parse_cache_revision(PatchSetMember * psm, const char * p_buff)
+ 	if (psm->pre_rev)
+ 	    psm->pre_rev->pre_psm = psm;
+     }
+-    else
+-    {
+-	list_add(&psm->post_rev->link, &psm->pre_rev->branch_children);
+-    }
++
++    update_branch_ends(psm->post_rev);
+ }
+ 
+ /************ Writing ************/
+ 
+-void write_cache(time_t cache_date)
++void write_cache(time_t cache_date, int mode)
+ {
+     struct hash_entry * file_iter;
+ 
+     ps_counter = 0;
+ 
+-    if ((cache_fp = cache_open("w")) == NULL)
+-    {
+-	debug(DEBUG_SYSERROR, "can't open cvsps.cache for write");
++    if ((cache_fp = cache_open("wb")) == NULL)
+ 	return;
+-    }
+ 
+-    fprintf(cache_fp, "cache version: %d\n", cache_version);
+-    fprintf(cache_fp, "cache date: %d\n", (int)cache_date);
++    gzprintf(cache_fp, "cache version: %d\n", cache_version);
++
++    /* The mode must match in read_cache, otherwise the cache is tossed. */
++    gzprintf(cache_fp, "cache mode: %d\n", mode);
++
++    gzprintf(cache_fp, "cache date: %ld\n", (long)cache_date);
+ 
+     reset_hash_iterator(file_hash);
+ 
+     while ((file_iter = next_hash_entry(file_hash)))
+     {
+ 	CvsFile * file = (CvsFile*)file_iter->he_obj;
++	struct hash_table * ht;
+ 	struct hash_entry * rev_iter;
+ 
+-	fprintf(cache_fp, "file: %s\n", file->filename);
++	gzprintf(cache_fp, "file: %s %s\n",
++		 file->default_branch_rev ? file->default_branch_rev : "",
++		 file->filename);
+ 
+ 	reset_hash_iterator(file->branches);
+ 	while ((rev_iter = next_hash_entry(file->branches)))
+ 	{
+ 	    char * rev = (char *)rev_iter->he_key;
+ 	    char * tag = (char *)rev_iter->he_obj;
+-	    fprintf(cache_fp, "%s: %s\n", rev, tag);
++	    gzprintf(cache_fp, "%s: %s%s\n", rev, tag,
++		     (file->vendor_branches &&
++		      get_hash_object(file->vendor_branches, tag)) ? " v" : "");
+ 	}
+ 
+-	fprintf(cache_fp, "\n");
++	gzprintf(cache_fp, "\n");
+ 
+ 	reset_hash_iterator(file->symbols);
+ 	while ((rev_iter = next_hash_entry(file->symbols)))
+@@ -461,25 +592,72 @@ void write_cache(time_t cache_date)
+ 	    CvsFileRevision * rev = (CvsFileRevision*)rev_iter->he_obj;
+ 	    
+ 	    if (rev->present)
+-		fprintf(cache_fp, "%s: %s\n", tag, rev->rev);
++		gzprintf(cache_fp, "%s: %s %s\n", tag, rev->rev, rev->branch);
+ 	}
+ 
+-	fprintf(cache_fp, "\n");
++	gzprintf(cache_fp, "\n");
+ 
+-	reset_hash_iterator(file->revisions);
+-	while ((rev_iter = next_hash_entry(file->revisions)))
++	for (ht = file->revisions; ht;)
+ 	{
+-	    CvsFileRevision * rev = (CvsFileRevision*)rev_iter->he_obj;
+-	    if (rev->present)
+-		fprintf(cache_fp, "%s %s\n", rev->rev, rev->branch);
++	    reset_hash_iterator(ht);
++	    while ((rev_iter = next_hash_entry(ht)))
++	    {
++		CvsFileRevision * rev = (CvsFileRevision*)rev_iter->he_obj;
++		if (rev->present)
++		{
++		    gzprintf(cache_fp, "%s %s %d %d %d", rev->rev, rev->branch,
++			     rev->ord, rev->dead ? -1 : (rev->empty_commit ? 0 : 1),
++			     rev->vendor_branch_joined);
++		    if (rev->copy_of)
++			gzprintf(cache_fp, " %s", rev->copy_of->branch);
++		    gzprintf(cache_fp, "\n");
++		}
++	    }
++	    if (ht == file->revisions)
++		ht = file->revision_copies;
++	    else
++		break;
+ 	}
+ 
+-	fprintf(cache_fp, "\n");
++	gzprintf(cache_fp, "\n");
++
++	for (ht = file->revisions; ht;)
++	{
++	    reset_hash_iterator(ht);
++	    while ((rev_iter = next_hash_entry(ht)))
++	    {
++		CvsFileRevision * rev = (CvsFileRevision*)rev_iter->he_obj;
++		if (rev->branches)
++		{
++		    struct hash_entry * branch_iter;
++		    gzprintf(cache_fp, "branches %s %s:", rev->rev, rev->branch);
++		    reset_hash_iterator(rev->branches);
++		    while ((branch_iter = next_hash_entry(rev->branches)))
++		    {
++			CvsFileRevision * branched_rev = (CvsFileRevision *)branch_iter->he_obj;
++			if (branched_rev == NO_REVISION)
++			    gzprintf(cache_fp, " %s;", branch_iter->he_key);
++			else
++			{
++			    assert(!strcmp(branch_iter->he_key, branched_rev->branch));
++			    gzprintf(cache_fp, " %s %s;", branch_iter->he_key, branched_rev->rev);
++			}
++		    }
++		    gzprintf(cache_fp, "\n");
++		}
++	    }
++	    if (ht == file->revisions)
++		ht = file->revision_copies;
++	    else
++		break;
++	}
++
++	gzprintf(cache_fp, "\n");
+     }
+ 
+-    fprintf(cache_fp, "\n");
++    gzprintf(cache_fp, "\n");
+     walk_all_patch_sets(write_patch_set_to_cache);
+-    fclose(cache_fp);
++    gzclose(cache_fp);
+     cache_fp = NULL;
+ }
+ 
+@@ -488,23 +666,21 @@ static void write_patch_set_to_cache(PatchSet * ps)
+     dump_patch_set(cache_fp, ps);
+ }
+ 
+-static void dump_patch_set(FILE * fp, PatchSet * ps)
++static void dump_patch_set(gzFile fp, PatchSet * ps)
+ {
+-    struct list_head * next = ps->members.next;
++    struct list_head * next;
+ 
+     ps_counter++;
+-    fprintf(fp, "patchset: %d\n", ps_counter);
+-    fprintf(fp, "date: %d\n", (int)ps->date);
+-    fprintf(fp, "author: %s\n", ps->author);
+-    fprintf(fp, "tag: %s\n", ps->tag ? ps->tag : "");
+-    fprintf(fp, "tag_flags: %d\n", ps->tag_flags);
+-    fprintf(fp, "branch: %s\n", ps->branch);
+-    fprintf(fp, "branch_add: %d\n", ps->branch_add);
+-    fprintf(fp, "descr:\n%s", ps->descr); /* descr is guaranteed to end with LF */
+-    fprintf(fp, CACHE_DESCR_BOUNDARY);
+-    fprintf(fp, "members:\n");
+-
+-    while (next != &ps->members)
++    gzprintf(fp, "patchset: %d\n", ps_counter);
++    gzprintf(fp, "date: %ld\n", (long)ps->date);
++    gzprintf(fp, "cmp_date: %ld.%ld\n", ps->cmp_date.tv_sec, ps->cmp_date.tv_usec);
++    gzprintf(fp, "author: %s\n", ps->author);
++    gzprintf(fp, "branch: %s\n", ps->branch);
++    gzprintf(fp, "descr:\n%s", ps->descr); /* descr is guaranteed to end with LF */
++    gzprintf(fp, CACHE_DESCR_BOUNDARY);
++    gzprintf(fp, "members:\n");
++
++    for (next = ps->members.next; next != &ps->members; next = next->next)
+     {
+ 	PatchSetMember * psm = list_entry(next, PatchSetMember, link);
+ 	int bp = 1;
+@@ -513,16 +689,15 @@ static void dump_patch_set(FILE * fp, PatchSet * ps)
+ 	if (!psm->pre_rev || (psm->pre_rev->pre_psm && psm->pre_rev->pre_psm == psm))
+ 	    bp = 0;
+ 
+-	fflush(fp);
+-    
+-	fprintf(fp, "file:%s; pre_rev:%s; post_rev:%s; dead:%d; branch_point:%d\n", 
+-		psm->file->filename, 
+-		psm->pre_rev ? psm->pre_rev->rev : "INITIAL", psm->post_rev->rev, 
+-		psm->post_rev->dead, bp);
+-	next = next->next;
++	gzprintf(fp, "file:%s; pre_rev:%s %s; post_rev:%s %s; date:%ld; branch_point:%d\n",
++		 psm->file->filename,
++		 psm->pre_rev ? psm->pre_rev->rev : "INITIAL",
++		 psm->pre_rev ? psm->pre_rev->branch : "",
++		 psm->post_rev->rev,  psm->post_rev->branch,
++		 (long) psm->date, bp);
+     }
+ 
+-    fprintf(fp, "\n");
++    gzprintf(fp, "\n");
+ }
+ 
+ /* where's arithmetic?... */
+diff --git a/cache.h b/cache.h
+index 996c4bc..ce18d69 100644
+--- a/cache.h
++++ b/cache.h
+@@ -6,7 +6,7 @@
+ #ifndef CACHE_H
+ #define CACHE_H
+ 
+-extern time_t read_cache();
+-extern void write_cache(time_t);
++extern time_t read_cache(int);
++extern void write_cache(time_t, int);
+ 
+ #endif /* CACHE_H */
+diff --git a/cvs_direct.c b/cvs_direct.c
+index e281848..0d15a94 100644
+--- a/cvs_direct.c
++++ b/cvs_direct.c
+@@ -284,15 +284,15 @@ static CvsServerCtx * open_ctx_forked(CvsServerCtx * ctx, const char * p_root)
+ 	tok2 = strsep(&tok, "@");
+ 
+ 	if (tok)
+-	    snprintf(execcmd, PATH_MAX, "%s -l %s %s %s server", cvs_rsh, tok2, tok, cvs_server);
++	    snprintf(execcmd, PATH_MAX, "%s -l %s %s %s -q server", cvs_rsh, tok2, tok, cvs_server);
+ 	else
+-	    snprintf(execcmd, PATH_MAX, "%s %s %s server", cvs_rsh, tok2, cvs_server);
++	    snprintf(execcmd, PATH_MAX, "%s %s %s -q server", cvs_rsh, tok2, cvs_server);
+ 
+ 	rep = p;
+     }
+     else
+     {
+-	snprintf(execcmd, PATH_MAX, "%s server", cvs_server);
++	snprintf(execcmd, PATH_MAX, "%s -q server", cvs_server);
+ 	rep = tok;
+     }
+ 
+@@ -858,18 +858,37 @@ void cvs_diff(CvsServerCtx * ctx,
+  * the compression state, and there was no way to resynchronize that state with
+  * the parent process.  We could use threads...
+  */
+-FILE * cvs_rlog_open(CvsServerCtx * ctx, const char * rep, const char * date_str)
++FILE * cvs_rlog_open(CvsServerCtx * ctx, char * log_args)
+ {
+-    /* note: use of the date_str is handled in a non-standard, cvsps specific way */
+-    if (date_str && date_str[0])
++    /* Note: Changes log_args destructively. */
++    char * p = log_args;
++
++    /* Split log_args. Very limited handling of quotes and separating ws. */
++    while (p)
+     {
+-	send_string(ctx, "Argument -d\n", rep);
+-	send_string(ctx, "Argument %s<1 Jan 2038 05:00:00 -0000\n", date_str);
+-	send_string(ctx, "Argument -d\n", rep);
+-	send_string(ctx, "Argument %s\n", date_str);
++	char * e;
++	if (*p == '\'')
++	{
++	    p++;
++	    e = strchr(p, '\'');
++	    if (e)
++	    {
++		*e++ = 0;
++		if (!*e)
++		    e = NULL;
++	    }
++	}
++	else
++	{
++	    e = strchr(p, ' ');
++	}
++	if (e)
++	    *e++ = 0;
++	if (*p)
++	    send_string(ctx, "Argument %s\n", p);
++	p = e;
+     }
+ 
+-    send_string(ctx, "Argument %s\n", rep);
+     send_string(ctx, "rlog\n");
+ 
+     /*
+diff --git a/cvs_direct.h b/cvs_direct.h
+index 1eb6c70..dceb927 100644
+--- a/cvs_direct.h
++++ b/cvs_direct.h
+@@ -16,7 +16,7 @@ void close_cvs_server(CvsServerCtx*);
+ void cvs_rdiff(CvsServerCtx *, const char *, const char *, const char *, const char *);
+ void cvs_rupdate(CvsServerCtx *, const char *, const char *, const char *, int, const char *);
+ void cvs_diff(CvsServerCtx *, const char *, const char *, const char *, const char *, const char *);
+-FILE * cvs_rlog_open(CvsServerCtx *, const char *, const char *);
++FILE * cvs_rlog_open(CvsServerCtx *, char *);
+ char * cvs_rlog_fgets(char *, int, CvsServerCtx *);
+ void cvs_rlog_close(CvsServerCtx *);
+ void cvs_version(CvsServerCtx *, char *, char *, int, int);
+diff --git a/cvsps.1 b/cvsps.1
+index cea0faf..54a7ff3 100644
+--- a/cvsps.1
++++ b/cvsps.1
+@@ -24,7 +24,9 @@ ignore (and rebuild) ~/.cvsps/cvsps.cache file
+ update ~/.cvsps/cvsps.cache file
+ .TP
+ .B \-z <fuzz>
+-set the timestamp fuzz factor for identifying patch sets
++set the timestamp fuzz factor for identifying patch sets.  Commits by
++the same author with the same log message and no more than this many
++seconds between each other are considered part of the same patch set.
+ .TP
+ .B \-g
+ generate diffs of the selected patch sets
+@@ -103,9 +105,19 @@ Override the setting of CVSROOT (overrides working dir. and environment).  For -
+ .TP
+ .B \-q
+ Be quiet about warnings.
++.TP
+ .B \-A
+ Show ancestor branch when a new branch is found.
+ .TP
++.B \-V
++Mirror commits on active vendor branches into their parent branches,
++to emulate the cvs vendor branch behavior.  Without this option,
++vendor branches are treated essentially like any normal branch
++instead.  If you intend to migrate a CVS repository to some other VCS
++without the vendor branch concept, then vendor branch mirroring is
++more accurate in the sense that checkouts at the same timestamp from
++the CVS repository and from the other VCS will be equal.
++.TP
+ .B \<repository>
+ Operate on the specified repository (overrides working dir.)
+ .SH "NOTE ON TAG HANDLING"
+@@ -148,6 +160,19 @@ alias for the 'log' command.  This means, for old versions of cvs, 'rlog' has
+ different semantics and usage.  cvsps will attempt to work around this problem
+ by detecting capable versions of cvs.  If an old version is detected, 'log' will
+ be used instead of 'rlog', and YMMV.
++.SH "NOTE ON THE CACHE"
++The cache records all tags, branches, patch sets etc that were
++generated from the 'rlog' output.  With -u, the cache is used and
++updated with recent history from the cvs repository.  Note however
++that cvs actions that change history do not automatically invalidate
++the cache.  Such actions include moving tags, using 'cvs admin -o',
++moving ',v' files around directly under the CVSROOT, etc.
++.PP
++If -V is used, then switching the default branch to or from a vendor
++branch is also considered a change of history (the default branch
++setting is not version controlled).  However in this the cache might
++actually help in keeping the history since it will contain the
++mirrored commits according to the default branch setting at the time.
+ .SH "NOTE ON GENERATED DIFFS"
+ Another important note is that cvsps will attempt, whenever possible, to use the
+ r\-commands (rlog, rdiff  and co) instead of the local commands (log, diff, and update).
+diff --git a/cvsps.c b/cvsps.c
+index f0e7d29..a45611f 100644
+--- a/cvsps.c
++++ b/cvsps.c
+@@ -3,6 +3,8 @@
+  * See COPYING file for license information 
+  */
+ 
++#include <assert.h>
++#include <stddef.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -40,6 +42,7 @@ RCSID("$Id: cvsps.c,v 4.108 2005/06/05 22:52:43 david Exp $");
+ enum
+ {
+     NEED_FILE,
++    NEED_BRANCH,
+     NEED_SYMS,
+     NEED_EOS,
+     NEED_START_LOG,
+@@ -54,13 +57,6 @@ CvsServerCtx * cvs_direct_ctx;
+ char root_path[PATH_MAX];
+ char repository_path[PATH_MAX];
+ 
+-const char * tag_flag_descr[] = {
+-    "",
+-    "**FUNKY**",
+-    "**INVALID**",
+-    "**INVALID**"
+-};
+-
+ const char * fnk_descr[] = {
+     "",
+     "FNK_SHOW_SOME",
+@@ -70,6 +66,7 @@ const char * fnk_descr[] = {
+ };
+ 
+ /* static globals */
++static char * head_branch;
+ static int ps_counter;
+ static void * ps_tree;
+ static struct hash_table * global_symbols;
+@@ -83,7 +80,6 @@ static int statistics;
+ static const char * test_log_file;
+ static struct hash_table * branch_heads;
+ static struct list_head all_patch_sets;
+-static struct list_head collisions;
+ static struct hash_table * branches;
+ 
+ /* settable via options */
+@@ -112,6 +108,7 @@ static int cvs_direct;
+ static int compress;
+ static char compress_arg[8];
+ static int track_branch_ancestry;
++static int mirror_vendor_branches;
+ 
+ static void check_norc(int, char *[]);
+ static int parse_args(int, char *[]);
+@@ -120,32 +117,42 @@ static void load_from_cvs();
+ static void init_paths();
+ static CvsFile * parse_file(const char *);
+ static CvsFileRevision * parse_revision(CvsFile * file, char * rev_str);
+-static void assign_pre_revision(PatchSetMember *, CvsFileRevision * rev);
++static void assign_pre_revision(PatchSetMember *, CvsFileRevision *);
++static void fix_rev_branches(CvsFile *);
++static void copy_vendor_branch_revs(CvsFile *);
++static void join_vendor_branch_initial_commit(PatchSet *);
++static void fix_patch_set_cmp_dates();
++static void coalesce_patch_sets();
++static void sort_patch_set_members(PatchSet *);
+ static void check_print_patch_set(PatchSet *);
++static int compare_global_symbol_tags(struct list_head *, struct list_head *);
+ static void print_patch_set(PatchSet *);
+ static void assign_patchset_id(PatchSet *);
+-static int compare_rev_strings(const char *, const char *);
+-static int compare_patch_sets_by_members(const PatchSet * ps1, const PatchSet * ps2);
++static void fix_branch_ancestry(PatchSet *);
+ static int compare_patch_sets_bk(const void *, const void *);
+ static int compare_patch_sets(const void *, const void *);
++static int compare_patch_sets_on_cmp_date(struct list_head *, struct list_head *);
+ static int compare_patch_sets_bytime_list(struct list_head *, struct list_head *);
+ static int compare_patch_sets_bytime(const PatchSet *, const PatchSet *);
+ static int is_revision_metadata(const char *);
+ static int patch_set_member_regex(PatchSet * ps, regex_t * reg);
+ static int patch_set_affects_branch(PatchSet *, const char *);
+ static void do_cvs_diff(PatchSet *);
++static CvsFileRevision * create_cvsfile_rev(CvsFile *, const char *);
+ static PatchSet * create_patch_set();
++static void free_cvsfile_rev(CvsFileRevision *);
++static void free_patch_set(PatchSet *);
+ static PatchSetRange * create_patch_set_range();
+ static void parse_sym(CvsFile *, char *);
+ static void resolve_global_symbols();
++static void check_global_symbols();
+ static int revision_affects_branch(CvsFileRevision *, const char *);
++static int count_dots(const char * p);
+ static int is_vendor_branch(const char *);
+ static void set_psm_initial(PatchSetMember * psm);
+-static int check_rev_funk(PatchSet *, CvsFileRevision *);
++static int check_rev_funk(PatchSet *, CvsFileRevision *, GlobalSymbol *);
+ static CvsFileRevision * rev_follow_branch(CvsFileRevision *, const char *);
+ static int before_tag(CvsFileRevision * rev, const char * tag);
+-static void determine_branch_ancestor(PatchSet * ps, PatchSet * head_ps);
+-static void handle_collisions();
+ static Branch * create_branch(const char * name) ;
+ static void find_branch_points(PatchSet * ps);
+ 
+@@ -184,7 +191,9 @@ int main(int argc, char *argv[])
+     branch_heads = create_hash_table(1023);
+     branches = create_hash_table(1023);
+     INIT_LIST_HEAD(&all_patch_sets);
+-    INIT_LIST_HEAD(&collisions);
++
++    /* To be able to compare branch names using ==. */
++    head_branch = get_string("HEAD");
+ 
+     /* this parses some of the CVS/ files, and initializes
+      * the repository_path and other variables 
+@@ -193,19 +202,8 @@ int main(int argc, char *argv[])
+ 
+     if (!ignore_cache)
+     {
+-	int save_fuzz_factor = timestamp_fuzz_factor;
+-
+-	/* the timestamp fuzz should only be in effect when loading from
+-	 * CVS, not re-fuzzed when loading from cache.  This is a hack
+-	 * working around bad use of global variables
+-	 */
+-
+-	timestamp_fuzz_factor = 0;
+-
+-	if ((cache_date = read_cache()) < 0)
++	if ((cache_date = read_cache(mirror_vendor_branches)) < 0)
+ 	    update_cache = 1;
+-
+-	timestamp_fuzz_factor = save_fuzz_factor;
+     }
+ 
+     if (cvs_direct && (do_diff || (update_cache && !test_log_file)))
+@@ -217,20 +215,76 @@ int main(int argc, char *argv[])
+ 	do_write_cache = 1;
+     }
+ 
+-    //XXX
+-    //handle_collisions();
++    if (mirror_vendor_branches)
++    {
++	struct hash_entry * he;
++	reset_hash_iterator(file_hash);
++	while ((he = next_hash_entry(file_hash)))
++	{
++	    CvsFile * file = (CvsFile *)he->he_obj;
++	    if (file->vendor_branches)
++		copy_vendor_branch_revs(file);
++	}
++    }
++
++    if (!bkcvs)
++    {
++	/* Unless in bkcvs mode, ps_tree now contains patch sets with
++	 * one commit each ordered by (branch, filename, post_rev)
++	 * (see rationale in compare_patch_sets). Can also have patch
++	 * sets from the cache with multiple commits, but they already
++	 * got cmp_dates and aren't touched. */
++
++	fix_patch_set_cmp_dates();
++
++	/* Now the patch sets are on all_patch_sets. */
++	list_sort(&all_patch_sets, compare_patch_sets_on_cmp_date);
++
++	/* all_patch_sets is now ordered by cmp_date. Assign tags and
++	 * branches to patch sets before coalescing them to ensure all
++	 * revisions in a tagged patch set actually carry the tag(s). */
++
++	/* Need to have temporary patch set numbers during the tag
++	 * resolution phase. */
++	ps_counter = 0;
++	walk_all_patch_sets(assign_patchset_id);
++
++	if (track_branch_ancestry)
++	    walk_all_patch_sets(fix_branch_ancestry);
++	resolve_global_symbols();
++
++	/* Now we can walk all_patch_sets in time order and merge
++	 * using the time fuzz factor. */
++
++	coalesce_patch_sets();
++    }
++
++    /* Ensure the member lists in all patch sets are sorted. It's
++     * required for compare_patch_sets_bytime_list to be
++     * deterministic. */
++    walk_all_patch_sets(sort_patch_set_members);
+ 
+     list_sort(&all_patch_sets, compare_patch_sets_bytime_list);
+ 
++    if (mirror_vendor_branches)
++	walk_all_patch_sets(join_vendor_branch_initial_commit);
++
++    /* Assign the final patch set ids. */
+     ps_counter = 0;
+     walk_all_patch_sets(assign_patchset_id);
+ 
+-    handle_collisions();
++    if (bkcvs)
++    {
++	/* Branches and tags have been fixed above if not in bkcvs mode. */
++	if (track_branch_ancestry)
++	    walk_all_patch_sets(fix_branch_ancestry);
++	resolve_global_symbols();
++    }
+ 
+-    resolve_global_symbols();
++    check_global_symbols();
+ 
+     if (do_write_cache)
+-	write_cache(cache_date);
++	write_cache(cache_date, mirror_vendor_branches);
+ 
+     if (statistics)
+ 	print_statistics(ps_tree);
+@@ -262,21 +316,32 @@ int main(int argc, char *argv[])
+ 
+ static void load_from_cvs()
+ {
++    time_t new_cache_date;
+     FILE * cvsfp;
+     char buff[BUFSIZ];
+     int state = NEED_FILE;
+     CvsFile * file = NULL;
++    struct hash_table * old_branch_tips = NULL;
+     PatchSetMember * psm = NULL;
+     char datebuff[26];
+     char authbuff[AUTH_STR_MAX];
+-    char logbuff[LOG_STR_MAX + 1];
++    int logbufflen = LOG_STR_MAX + 1;
++    char * logbuff = malloc(logbufflen);
+     int loglen = 0;
+     int have_log = 0;
+-    char cmd[BUFSIZ];
++    char log_args[BUFSIZ];
+     char date_str[64];
+     char use_rep_buff[PATH_MAX];
+     char * ltype;
+ 
++    buff[0] = 0; /* Due to valgrind detected use of uninitialized buffer. */
++
++    if (logbuff == NULL)
++    {
++	debug(DEBUG_SYSERROR, "could not malloc %d bytes for logbuff in load_from_cvs", logbufflen);
++	exit(1);
++    }
++
+     if (!no_rlog && !test_log_file && cvs_check_cap(CAP_HAVE_RLOG))
+     {
+ 	ltype = "rlog";
+@@ -288,43 +353,47 @@ static void load_from_cvs()
+ 	use_rep_buff[0] = 0;
+     }
+ 
++    /* Step back one second from now to stay safe from the theoretical
++     * possibility that a commit might go in this second, which would mean
++     * that we wouldn't know if it'd be included in the range or not. */
++    new_cache_date = time(NULL) - 1;
++
+     if (cache_date > 0)
+     {
+-	struct tm * tm = gmtime(&cache_date);
++	char to_date_str[64];
++	struct tm * tm;
++	cache_date++;		/* Compensate for inclusive range. */
++	tm = gmtime(&cache_date);
+ 	strftime(date_str, 64, "%d %b %Y %H:%M:%S %z", tm);
+-
+-	/* this command asks for logs using two different date
+-	 * arguments, separated by ';' (see man rlog).  The first
+-	 * gets all revisions more recent than date, the second 
+-	 * gets a single revision no later than date, which combined
+-	 * get us all revisions that have occurred since last update
+-	 * and overlaps what we had before by exactly one revision,
+-	 * which is necessary to fill in the pre_rev stuff for a 
+-	 * PatchSetMember
+-	 */
+-	snprintf(cmd, BUFSIZ, "cvs %s %s %s -d '%s<;%s' %s", compress_arg, norc, ltype, date_str, date_str, use_rep_buff);
++	tm = gmtime(&new_cache_date);
++	strftime(to_date_str, 64, "%d %b %Y %H:%M:%S %z", tm);
++	snprintf(log_args, BUFSIZ, "-S -d '%s<=%s' %s", date_str, to_date_str, use_rep_buff);
+     }
+     else
+     {
+ 	date_str[0] = 0;
+-	snprintf(cmd, BUFSIZ, "cvs %s %s %s %s", compress_arg, norc, ltype, use_rep_buff);
++	strcpy(log_args, use_rep_buff);
+     }
+     
+-    debug(DEBUG_STATUS, "******* USING CMD %s", cmd);
++    debug(DEBUG_STATUS, "******* USING LOG ARGS %s", log_args);
+ 
+-    cache_date = time(NULL);
++    cache_date = new_cache_date;
+ 
+     /* FIXME: this is ugly, need to virtualize the accesses away from here */
+     if (test_log_file)
+ 	cvsfp = fopen(test_log_file, "r");
+     else if (cvs_direct_ctx)
+-	cvsfp = cvs_rlog_open(cvs_direct_ctx, repository_path, date_str);
++	cvsfp = cvs_rlog_open(cvs_direct_ctx, log_args);
+     else
++    {
++	char cmd[BUFSIZ];
++	snprintf(cmd, BUFSIZ, "cvs -q %s %s %s %s", compress_arg, norc, ltype, log_args);
+ 	cvsfp = popen(cmd, "r");
++    }
+ 
+     if (!cvsfp)
+     {
+-	debug(DEBUG_SYSERROR, "can't open cvs pipe using command %s", cmd);
++	debug(DEBUG_SYSERROR, "can't open cvs pipe with log args %s", log_args);
+ 	exit(1);
+     }
+ 
+@@ -345,7 +414,33 @@ static void load_from_cvs()
+ 	{
+ 	case NEED_FILE:
+ 	    if (strncmp(buff, "RCS file", 8) == 0 && (file = parse_file(buff)))
++	    {
++		struct hash_entry * he;
++		state = NEED_BRANCH;
++
++		/* Make a copy of the current branch tips for -u
++		 * operation. We need them later to connect the new
++		 * revisions to the cached revs. */
++		old_branch_tips = create_hash_table(13);
++		reset_hash_iterator(file->branch_tips);
++		while ((he = next_hash_entry(file->branch_tips)))
++		    put_hash_object_ex(old_branch_tips, he->he_key, he->he_obj,
++				       HT_NO_KEYCOPY, NULL, NULL);
++	    }
++	    break;
++	case NEED_BRANCH:
++	    if (strncmp(buff, "branch:", 7) == 0)
++	    {
++		file->default_branch_rev = head_branch;
++		if (buff[7])
++		{
++		    assert(isspace(buff[7]));
++		    chop(buff + 8);
++		    if (buff[8])
++			file->default_branch_rev = get_string(buff + 8);
++		}
+ 		state = NEED_SYMS;
++	    }
+ 	    break;
+ 	case NEED_SYMS:
+ 	    if (strncmp(buff, "symbolic names:", 15) == 0)
+@@ -374,10 +469,6 @@ static void load_from_cvs()
+ 		strcpy(new_rev, buff + 9);
+ 		chop(new_rev);
+ 
+-		/* 
+-		 * rev may already exist (think cvsps -u), in which
+-		 * case parse_revision is a hash lookup
+-		 */
+ 		rev = parse_revision(file, new_rev);
+ 
+ 		/* 
+@@ -389,26 +480,12 @@ static void load_from_cvs()
+ 
+ 		assign_pre_revision(psm, rev);
+ 
+-		/*
+-		 * if this is a new revision, it will have no post_psm associated.
+-		 * otherwise we are (probably?) hitting the overlap in cvsps -u 
+-		 */
+-		if (!rev->post_psm)
+-		{
+-		    psm = rev->post_psm = create_patch_set_member();
+-		    psm->post_rev = rev;
+-		    psm->file = file;
+-		    state = NEED_DATE_AUTHOR_STATE;
+-		}
+-		else
+-		{
+-		    /* we hit this in cvsps -u mode, we are now up-to-date
+-		     * w.r.t this particular file. skip all of the rest 
+-		     * of the info (revs and logs) until we hit the next file
+-		     */
+-		    psm = NULL;
+-		    state = NEED_EOM;
+-		}
++		assert(!rev->post_psm);
++		psm = rev->post_psm = create_patch_set_member();
++		psm->post_rev = rev;
++		psm->file = file;
++		update_branch_ends(rev);
++		state = NEED_DATE_AUTHOR_STATE;
+ 	    }
+ 	    break;
+ 	case NEED_DATE_AUTHOR_STATE:
+@@ -444,6 +521,9 @@ static void load_from_cvs()
+ 			    psm->post_rev->dead = 1;
+ 		}
+ 
++		if (strstr(buff, "lines: +0 -0;"))
++		  psm->post_rev->empty_commit = 1;
++
+ 		state = NEED_EOM;
+ 	    }
+ 	    break;
+@@ -452,8 +532,9 @@ static void load_from_cvs()
+ 	    {
+ 		if (psm)
+ 		{
+-		    PatchSet * ps = get_patch_set(datebuff, logbuff, authbuff, psm->post_rev->branch, psm);
+-		    patch_set_add_member(ps, psm);
++		    time_t rev_date;
++		    convert_date(&rev_date, datebuff);
++		    get_patch_set(rev_date, logbuff, authbuff, psm->post_rev->branch, psm, NULL);
+ 		}
+ 
+ 		logbuff[0] = 0;
+@@ -465,16 +546,23 @@ static void load_from_cvs()
+ 	    {
+ 		if (psm)
+ 		{
+-		    PatchSet * ps = get_patch_set(datebuff, logbuff, authbuff, psm->post_rev->branch, psm);
+-		    patch_set_add_member(ps, psm);
+-		    assign_pre_revision(psm, NULL);
++		    time_t rev_date;
++		    convert_date(&rev_date, datebuff);
++		    get_patch_set(rev_date, logbuff, authbuff, psm->post_rev->branch, psm, NULL);
++		    /* Connect to the latest cache revision if in -u
++		     * mode, otherwise mark psm as a branch tail. */
++		    assign_pre_revision(psm, (CvsFileRevision *) get_hash_object(old_branch_tips, psm->post_rev->branch));
+ 		}
+ 
++		fix_rev_branches(file);
++
+ 		logbuff[0] = 0;
+ 		loglen = 0;
+ 		have_log = 0;
+ 		psm = NULL;
+ 		file = NULL;
++		destroy_hash_table(old_branch_tips, NULL);
++		old_branch_tips = NULL;
+ 		state = NEED_FILE;
+ 	    }
+ 	    else
+@@ -484,25 +572,22 @@ static void load_from_cvs()
+ 		 */
+ 		if (have_log || !is_revision_metadata(buff))
+ 		{
+-		    /* if the log buffer is full, that's it.  
+-		     * 
+-		     * Also, read lines (fgets) always have \n in them
+-		     * (unless truncation happens)
+-		     * which we count on.  So if truncation happens,
+-		     * be careful to put a \n on.
+-		     * 
+-		     * Buffer has LOG_STR_MAX + 1 for room for \0 if
+-		     * necessary
+-		     */
+-		    if (loglen < LOG_STR_MAX)
++		    /* If the log buffer is full, try to reallocate more. */
++		    if (loglen < logbufflen)
+ 		    {
+ 			int len = strlen(buff);
+ 			
+-			if (len >= LOG_STR_MAX - loglen)
++			if (len >= logbufflen - loglen)
+ 			{
+-			    debug(DEBUG_APPMSG1, "WARNING: maximum log length exceeded, truncating log");
+-			    len = LOG_STR_MAX - loglen;
+-			    buff[len - 1] = '\n';
++			    debug(DEBUG_STATUS, "reallocating logbufflen to %d bytes for file %s", logbufflen, file->filename);
++			    logbufflen += (len >= LOG_STR_MAX ? (len+1) : LOG_STR_MAX);
++			    char * newlogbuff = realloc(logbuff, logbufflen);
++			    if (newlogbuff == NULL)
++			    {
++				debug(DEBUG_SYSERROR, "could not realloc %d bytes for logbuff in load_from_cvs", logbufflen);
++				exit(1);
++			    }
++			    logbuff = newlogbuff;
+ 			}
+ 
+ 			debug(DEBUG_STATUS, "appending %s to log", buff);
+@@ -522,9 +607,10 @@ static void load_from_cvs()
+ 	}
+     }
+ 
+-    if (state == NEED_SYMS)
++    if (state == NEED_BRANCH || state == NEED_SYMS)
+     {
+-	debug(DEBUG_APPERROR, "Error: 'symbolic names' not found in log output.");
++	debug(DEBUG_APPERROR, "Error: '%s' not found in log output.",
++	      state == NEED_BRANCH ? "branch" : "symbolic names");
+ 	debug(DEBUG_APPERROR, "       Perhaps you should try running with --norc");
+ 	exit(1);
+     }
+@@ -565,7 +651,7 @@ static int usage(const char * str1, const char * str2)
+     debug(DEBUG_APPERROR, "             [--test-log <captured cvs log file>] [--bkcvs]");
+     debug(DEBUG_APPERROR, "             [--no-rlog] [--diff-opts <option string>] [--cvs-direct]");
+     debug(DEBUG_APPERROR, "             [--debuglvl <bitmask>] [-Z <compression>] [--root <cvsroot>]");
+-    debug(DEBUG_APPERROR, "             [-q] [-A] [<repository>]");
++    debug(DEBUG_APPERROR, "             [-q] [-A] [-V] [<repository>]");
+     debug(DEBUG_APPERROR, "");
+     debug(DEBUG_APPERROR, "Where:");
+     debug(DEBUG_APPERROR, "  -h display this informative message");
+@@ -599,6 +685,7 @@ static int usage(const char * str1, const char * str2)
+     debug(DEBUG_APPERROR, "  --root <cvsroot> specify cvsroot.  overrides env. and working directory (cvs-direct only)");
+     debug(DEBUG_APPERROR, "  -q be quiet about warnings");
+     debug(DEBUG_APPERROR, "  -A track and report branch ancestry");
++    debug(DEBUG_APPERROR, "  -V mirror active vendor branches onto their parents");
+     debug(DEBUG_APPERROR, "  <repository> apply cvsps to repository.  overrides working directory");
+     debug(DEBUG_APPERROR, "\ncvsps version %s\n", VERSION);
+ 
+@@ -904,6 +991,13 @@ static int parse_args(int argc, char *argv[])
+ 	    continue;
+ 	}
+ 
++	if (strcmp(argv[i], "-V") == 0)
++	{
++	    mirror_vendor_branches = 1;
++	    i++;
++	    continue;
++	}
++
+ 	if (argv[i][0] == '-')
+ 	    return usage("invalid argument", argv[i]);
+ 	
+@@ -1159,7 +1253,7 @@ static CvsFile * parse_file(const char * buff)
+     return retval;
+ }
+ 
+-PatchSet * get_patch_set(const char * dte, const char * log, const char * author, const char * branch, PatchSetMember * psm)
++PatchSet * get_patch_set(time_t rev_date, const char * log, const char * author, const char * branch, PatchSetMember * psm, const struct timeval *cmp_date)
+ {
+     PatchSet * retval = NULL, **find = NULL;
+     int (*cmp1)(const void *,const void*) = (bkcvs) ? compare_patch_sets_bk : compare_patch_sets;
+@@ -1170,33 +1264,39 @@ PatchSet * get_patch_set(const char * dte, const char * log, const char * author
+ 	return NULL;
+     }
+ 
+-    convert_date(&retval->date, dte);
++    /* Patch sets are coalesced here only in bkcvs mode. Otherwise
++     * it's done later by coalesce_patch_sets when the patch sets have
++     * a proper order. */
++
++    retval->date = rev_date;
+     retval->author = get_string(author);
+     retval->descr = xstrdup(log);
+     retval->branch = get_string(branch);
+-    
+-    /* we are looking for a patchset suitable for holding this member.
+-     * this means two things:
+-     * 1) a patchset already containing an entry for the file is no good
+-     * 2) for two patchsets with same exact date/time, if they reference 
+-     *    the same file, we can properly order them.  this primarily solves
+-     *    the 'cvs import' problem and may not have general usefulness
+-     *    because it would only work if the first member we consider is
+-     *    present in the existing ps.
+-     */
+-    if (psm)
+-	list_add(&psm->link, retval->members.prev);
+ 
+-    find = (PatchSet**)tsearch(retval, &ps_tree, cmp1);
++    retval->branch_rev = (char *) get_hash_object(psm->file->branches_sym,
++						  retval->branch);
++    if (!retval->branch_rev)
++    {
++	retval->branch_rev = "";
++    }
+ 
+-    if (psm)
+-	list_del(&psm->link);
++    psm->date = rev_date;
++    patch_set_add_member(retval, psm);
++
++    if (cmp_date)
++    {
++	retval->cmp_date = *cmp_date;
++    }
++
++    find = (PatchSet**)tsearch(retval, &ps_tree, cmp1);
+ 
+     if (*find != retval)
+     {
+ 	debug(DEBUG_STATUS, "found existing patch set");
+ 
+-	if (bkcvs && strstr(retval->descr, "BKrev:"))
++	assert(bkcvs);
++
++	if (strstr(retval->descr, "BKrev:"))
+ 	{
+ 	    free((*find)->descr);
+ 	    (*find)->descr = retval->descr;
+@@ -1206,20 +1306,7 @@ PatchSet * get_patch_set(const char * dte, const char * log, const char * author
+ 	    free(retval->descr);
+ 	}
+ 
+-	/* keep the minimum date of any member as the 'actual' date */
+-	if (retval->date < (*find)->date)
+-	    (*find)->date = retval->date;
+-
+-	/* expand the min_date/max_date window to help finding other members .
+-	 * open the window by an extra margin determined by the fuzz factor 
+-	 */
+-	if (retval->date - timestamp_fuzz_factor < (*find)->min_date)
+-	{
+-	    (*find)->min_date = retval->date - timestamp_fuzz_factor;
+-	    //debug(DEBUG_APPMSG1, "WARNING: non-increasing dates in encountered patchset members");
+-	}
+-	else if (retval->date + timestamp_fuzz_factor > (*find)->max_date)
+-	    (*find)->max_date = retval->date + timestamp_fuzz_factor;
++	assert((*find)->date == retval->date);
+ 
+ 	free(retval);
+ 	retval = *find;
+@@ -1227,14 +1314,21 @@ PatchSet * get_patch_set(const char * dte, const char * log, const char * author
+     else
+     {
+ 	debug(DEBUG_STATUS, "new patch set!");
+-	debug(DEBUG_STATUS, "%s %s %s", retval->author, retval->descr, dte);
+ 
+-	retval->min_date = retval->date - timestamp_fuzz_factor;
+-	retval->max_date = retval->date + timestamp_fuzz_factor;
++	retval->min_date = retval->date;
++	retval->max_date = retval->date;
+ 
+-	list_add(&retval->all_link, &all_patch_sets);
++	if (bkcvs)
++	{
++	    /* Done later by fix_patch_set_cmp_dates otherwise. */
++	    retval->cmp_date.tv_sec = retval->date;
++	    list_add(&retval->all_link, &all_patch_sets);
++	}
+     }
+ 
++    debug(DEBUG_STATUS, "got patch set %p with member %p: %s %s date %ld \"%s\"",
++	  retval, psm, psm->file->filename, psm->post_rev->rev,
++	  (long) rev_date, retval->descr);
+ 
+     return retval;
+ }
+@@ -1264,6 +1358,45 @@ static int get_branch(char * buff, const char * rev)
+     return get_branch_ext(buff, rev, NULL);
+ }
+ 
++void update_branch_ends(CvsFileRevision * rev)
++{
++    CvsFile * file = rev->file;
++
++    if (!rev->pre_psm)
++	put_hash_object_ex(file->branch_tips, rev->branch, rev,
++			   HT_NO_KEYCOPY, NULL, NULL);
++    if (!rev->post_psm->pre_rev ||
++	rev->post_psm->pre_rev->branch != rev->branch)
++	put_hash_object_ex(file->branch_tails, rev->branch, rev,
++			   HT_NO_KEYCOPY, NULL, NULL);
++}
++
++static void remove_from_branch_ends(CvsFileRevision * rev)
++{
++    CvsFile * file = rev->file;
++    CvsFileRevision * pre_rev = rev->post_psm->pre_rev;
++
++    if (!rev->pre_psm)
++    {
++	assert(get_hash_object(file->branch_tips, rev->branch));
++	if (pre_rev && pre_rev->branch == rev->branch)
++	{
++	    put_hash_object_ex(file->branch_tips, rev->branch, pre_rev,
++			       HT_NO_KEYCOPY, NULL, NULL);
++	}
++	else
++	{
++	    remove_hash_object(file->branch_tips, rev->branch);
++	    remove_hash_object(file->branch_tails, rev->branch);
++	}
++    }
++    else if (!pre_rev || pre_rev->branch != rev->branch)
++    {
++	put_hash_object_ex(file->branch_tails, rev->branch, rev->pre_psm->post_rev,
++			   HT_NO_KEYCOPY, NULL, NULL);
++    }
++}
++
+ /* 
+  * the goal if this function is to determine what revision to assign to
+  * the psm->pre_rev field.  usually, the log file is strictly 
+@@ -1275,73 +1408,1142 @@ static int get_branch(char * buff, const char * rev)
+ static void assign_pre_revision(PatchSetMember * psm, CvsFileRevision * rev)
+ {
+     char pre[REV_STR_MAX], post[REV_STR_MAX];
++    CvsFileRevision * pre_rev;
+ 
+     if (!psm)
+ 	return;
++
++    if (!get_branch(post, psm->post_rev->rev))
++    {
++	debug(DEBUG_APPERROR, "get_branch malformed input (1)");
++	return;
++    }
+     
+-    if (!rev)
++    if (rev)
+     {
+-	/* if psm was last rev. for file, it's either an 
+-	 * INITIAL, or first rev of a branch.  to test if it's 
+-	 * the first rev of a branch, do get_branch twice - 
+-	 * this should be the bp.
++	/*
++	 * is this canditate for 'pre' on the same branch as our 'post'?
++	 * this is the normal case
+ 	 */
+-	if (get_branch(post, psm->post_rev->rev) && 
+-	    get_branch(pre, post))
++	if (!get_branch(pre, rev->rev))
+ 	{
+-	    psm->pre_rev = file_get_revision(psm->file, pre);
+-	    list_add(&psm->post_rev->link, &psm->pre_rev->branch_children);
++	    debug(DEBUG_APPERROR, "get_branch malformed input (2)");
++	    return;
+ 	}
+-	else
++
++	/* If the branches are equal then we've got the predecessor. Also,
++	 * if the branches contain no dots then treat it as a continuation
++	 * of HEAD. That's to cope with the odd cvs feature that allows
++	 * revision number discontinuity, e.g. 1.17 can be followed by
++	 * 2.0.
++	 *
++	 * Such discontinuities should not be possible on a subbranch
++	 * since all revision integers except the last are used to
++	 * identify the subbranch (and we handle discontinuities in the
++	 * last slot without any extra effort). */
++	if (strcmp(pre, post) == 0 ||
++	    (!strchr(pre, '.') && !strchr(post, '.')))
+ 	{
+-	    set_psm_initial(psm);
++	    psm->pre_rev = rev;
++	    rev->pre_psm = psm;
++	    /* Leave some gap to lessen the burden on update_rev_ord. */
++	    rev->ord = psm->post_rev->ord - 256;
++	    return;
+ 	}
+-	return;
++
++	/* branches don't match. rev must be head of branch,
++	 * so psm is oldest rev. on branch. or oldest
++	 * revision overall.
++	 */
+     }
+ 
+-    /* 
+-     * is this canditate for 'pre' on the same branch as our 'post'? 
+-     * this is the normal case
++    rev = psm->post_rev;
++
++    /* Find out the branch revision on the parent branch by chopping
++     * off another '.' piece from the branch rev. If we can't do that
++     * then we're on HEAD and got the initial rev in psm.
+      */
+-    if (!get_branch(pre, rev->rev))
++    if (!get_branch(pre, post))
+     {
+-	debug(DEBUG_APPERROR, "get_branch malformed input (1)");
++	if (rev->dead)
++	{
++	    /* cvs constructs a dead initial rev on HEAD if the file
++	     * got initially added on a branch. Get rid of it. */
++#ifndef NDEBUG
++	    void * del_ok =
++#endif
++		tdelete(psm->ps, &ps_tree,
++			bkcvs ? compare_patch_sets_bk : compare_patch_sets);
++	    assert(del_ok);
++	    debug(DEBUG_STATUS, "ignoring initial dead rev %s for %s",
++		  rev->rev, psm->file->filename);
++	    remove_from_branch_ends(rev);
++	    if (rev->pre_psm)
++		set_psm_initial(rev->pre_psm);
++	    free_patch_set(psm->ps);
++	    return;
++	}
++
++	set_psm_initial(psm);
+ 	return;
+     }
+ 
+-    if (!get_branch(post, psm->post_rev->rev))
++    pre_rev = (CvsFileRevision*)get_hash_object(psm->file->revisions, pre);
++
++    if (rev->dead &&
++	(!pre_rev || psm->date == pre_rev->post_psm->date))
+     {
+-	debug(DEBUG_APPERROR, "get_branch malformed input (2)");
++	/* If the file was added on a branch while being deleted on
++	 * the parent branch (which cvs by nature always resolves to
++	 * HEAD) then cvs constructs a delete commit first on the
++	 * branch with the same timestamp as the delete commit on the
++	 * parent branch. We got the constructed commit in rev here,
++	 * so let's ignore it and consider the file initially added on
++	 * the branch at the next revision. */
++#ifndef NDEBUG
++	void * del_ok =
++#endif
++	    tdelete(psm->ps, &ps_tree,
++		    bkcvs ? compare_patch_sets_bk : compare_patch_sets);
++	assert(del_ok);
++	debug(DEBUG_STATUS, "ignoring initial dead rev %s for %s",
++	      rev->rev, psm->file->filename);
++	remove_from_branch_ends(rev);
++	if (rev->pre_psm)
++	    set_psm_initial(rev->pre_psm);
++	free_patch_set(psm->ps);
+ 	return;
+     }
+ 
+-    if (strcmp(pre, post) == 0)
++    if (!pre_rev)
+     {
+-	psm->pre_rev = rev;
+-	rev->pre_psm = psm;
++	/* The branch revision was a phony cvs construct that we've
++	 * ignored, or perhaps someone has done something funny with
++	 * cvs admin -o. In any case, we treat this as an initial rev
++	 * on this branch. */
++	set_psm_initial(psm);
++    }
++    else
++    {
++	psm->pre_rev = pre_rev;
++    }
++}
++
++static void fix_rev_branches(CvsFile * file)
++{
++    struct hash_entry * he;
++    reset_hash_iterator(file->branches);
++    while ((he = next_hash_entry(file->branches)))
++    {
++	char fork_rev_str[REV_STR_MAX];
++	char *branch_rev = he->he_key;
++	if (get_branch(fork_rev_str, branch_rev))
++	{
++	    CvsFileRevision * fork_rev = (CvsFileRevision *)get_hash_object(file->revisions, fork_rev_str);
++	    if (fork_rev)
++	    {
++		CvsFileRevision * branch_tail = (CvsFileRevision *)get_hash_object(file->branch_tails, (char *) he->he_obj);
++		if (!fork_rev->branches)
++		    fork_rev->branches = create_hash_table(3);
++		debug(DEBUG_STATUS, "put emanating branch %s with rev %s on %s %s",
++		      (char *) he->he_obj, branch_tail ? branch_tail->rev : "(none)",
++		      file->filename, fork_rev->rev);
++		put_hash_object_ex(fork_rev->branches, (char *) he->he_obj,
++				   branch_tail ? branch_tail : NO_REVISION,
++				   HT_NO_KEYCOPY, NULL, NULL);
++	    }
++	}
++    }
++}
++
++/* Updates the sequence in rev->ord for all revisions emanating from rev. */
++static void update_rev_ord(CvsFileRevision * rev, int ord)
++{
++    if (rev->ord >= ord)
+ 	return;
++
++    rev->ord = ord++;
++
++    while (1)
++    {
++	if (rev->branches)
++	{
++	    struct hash_entry * he;
++	    reset_hash_iterator(rev->branches);
++	    while ((he = next_hash_entry(rev->branches)))
++	    {
++		CvsFileRevision * branch_rev = (CvsFileRevision *) he->he_obj;
++		if (branch_rev != NO_REVISION)
++		    update_rev_ord(branch_rev, ord);
++	    }
++	}
++
++	if (!rev->pre_psm)
++	    break;
++
++	rev = rev->pre_psm->post_rev;
++	if (rev->ord >= ord)
++	    break;
++	rev->ord = ord++;
+     }
+-    
+-    /* branches don't match. new_psm must be head of branch,
+-     * so psm is oldest rev. on branch. or oldest
+-     * revision overall.  if former, derive predecessor.  
+-     * use get_branch to chop another rev. off of string.
++}
++
++static void move_branches(CvsFileRevision * from, CvsFileRevision * to)
++{
++    if (from->branches)
++    {
++	struct hash_entry * he;
++	if (!to->branches)
++	    to->branches = create_hash_table(3);
++	reset_hash_iterator(from->branches);
++	while ((he = next_hash_entry(from->branches)))
++	{
++	    CvsFileRevision * branch_rev = (CvsFileRevision *)  he->he_obj;
++	    put_hash_object_ex(to->branches, he->he_key, branch_rev,
++			       HT_NO_KEYCOPY, NULL, NULL);
++	    if (branch_rev != NO_REVISION)
++		branch_rev->post_psm->pre_rev = to;
++	}
++	destroy_hash_table(from->branches, NULL);
++	from->branches = NULL;
++    }
++}
++
++static void move_tags(CvsFileRevision * from, CvsFileRevision * to)
++{
++    struct list_head * l;
++    CvsFile * file = from->file;
++    assert(from->file == to->file);
++
++    for (l = from->tags.next; l != &from->tags; l = l->next)
++    {
++	Tag * tag = list_entry(l, Tag, rev_link);
++	tag->rev = to;
++	put_hash_object_ex(file->symbols, tag->tag, to, HT_NO_KEYCOPY, NULL, NULL);
++    }
++    list_splice(&from->tags, to->tags.prev);
++    INIT_LIST_HEAD(&from->tags);
++}
++
++static void setup_rev_copy(CvsFileRevision * orig, CvsFileRevision * copy)
++{
++    CvsFile * file = orig->file;
++
++    assert(orig->file == copy->file);
++    assert(orig->present);
++    assert(!copy->copy_of);
++    assert(!orig->copied_to);
++
++    copy->present = 1;
++    copy->copy_of = orig;
++    orig->copied_to = copy;
++
++    /* Note that the copy is not put into rev->file->revisions or
++     * rev->file->symbols - they still look up the original. */
++
++    if (!file->revision_copies)
++	file->revision_copies = create_hash_table(31);
++    assert(!get_hash_object(file->revision_copies, copy->rev));
++    put_hash_object_ex(file->revision_copies, copy->rev, copy,
++		       HT_NO_KEYCOPY, NULL, NULL);
++}
++
++static CvsFileRevision * copy_vendor_rev(CvsFileRevision * rev, CvsFileRevision * prev)
++{
++    PatchSet * ps = rev->post_psm->ps;
++    CvsFileRevision * rev_copy = create_cvsfile_rev(rev->file, rev->rev);
++    PatchSetMember * psm_copy = create_patch_set_member();
++
++    setup_rev_copy(rev, rev_copy);
++
++    rev_copy->dead = rev->dead;
++    rev_copy->branch = prev->branch;
++    rev_copy->present = 1;
++    rev_copy->ord = prev->ord + 1;
++
++    /* If a vendor branch has been active and the user put tags on the
++     * normal branch then cvs actually puts them on the vendor branch.
++     * Correct for that by moving over all branch tags to the normal
++     * branch copy.
+      *
+-     * FIXME:
+-     * There's also a weird case.  it's possible to just re-number
+-     * a revision to any future revision. i.e. rev 1.9 becomes 2.0
+-     * It's not widely used.  In those cases of discontinuity,
+-     * we end up stamping the predecessor as 'INITIAL' incorrectly
++     * We can't move tags yet, because there can be tags that are put
++     * on the normal branch and therefore end up both on the vendor
++     * and normal branches, and there can be tags that are put
++     * explicitly on the vendor branch (typically to mark vendor
++     * releases, according to cvs guidelines). At this point we might
++     * not have all files for a tag, so this is sorted out later in
++     * resolve_global_symbols. */
++    move_branches(rev, rev_copy);
++
++    rev_copy->post_psm = psm_copy;
++    psm_copy->post_rev = rev_copy;
++
++    psm_copy->file = rev->file;
++
++    if (prev->pre_psm)
++    {
++	rev_copy->pre_psm = prev->pre_psm;
++	rev_copy->pre_psm->pre_rev = rev_copy;
++	update_rev_ord(rev_copy->pre_psm->post_rev, rev_copy->ord + 1);
++    }
++
++    psm_copy->pre_rev = prev;
++    prev->pre_psm = psm_copy;
++
++    get_patch_set(rev->post_psm->date, ps->descr, ps->author, prev->branch, psm_copy, NULL);
++
++    return rev_copy;
++}
++
++/*
++ * This function tries to simulate the behavior of cvs vendor
++ * branches: In cvs, a checkout of a (normal) branch actually means
++ * that the corresponding version on the vendor branch gets checked
++ * out if it hasn't been overridden by a local commit. (That also
++ * means that the vendor branch gets the tags when the user think
++ * she's tagging the checked-out branch, btw.)
++ *
++ * Whether the vendor branch overrides the normal branch or vice versa
++ * is controlled by the rcs "branch:" header which names the "current
++ * branch" (normally unset). That header can actually point to any
++ * branch, which will override the user-specified checkout branch, but
++ * cvs assumes it is used for nothing else than this vendor branch
++ * thingy, so we do that too.
++ *
++ * The "current branch" header is not version controlled, so we have
++ * no record of which branch was current at which time. Therefore we
++ * can only do a fairly lame attempt at reconstructing the commit
++ * history (where "commit history" is defined as "what
++ * 'cvs checkout/update' produced at the time"):
++ *
++ * o  If the current branch is unset then the users have done local
++ *    commits. If they have followed the workflow for vendor branches
++ *    proposed in the cvs manual, they have possibly merged in new
++ *    vendor revs into the normal branch after that. If this is the
++ *    case then the history on the normal branch is accurate as it is
++ *    and we better not do anything.
++ *
++ *    It is however possible that users have reset the default to the
++ *    vendor branch after each import and then applied their local
++ *    changes again. In that case it'd be better to mirror the import
++ *    commits before the user commit, so that they get properly
++ *    minimized. But we have no way of knowing that.
++ *
++ *    In any case, it's the revision on the normal branch that should
++ *    get checked out at the tip of the normal branch.
++ *
++ * o  If the current branch is set to the vendor branch then there has
++ *    either been no local commits, or some user has "reverted" to the
++ *    last vendor release, and it's the vendor revisions that are
++ *    reflected in the normal branch. That applies at least to the
++ *    last vendor revision, so we should simulate it by copying (at
++ *    least) the last vendor branch revision to the normal branch.
++ *
++ *    We also choose to copy all preceding vendor revs that have later
++ *    dates than the last local commit on the normal branch. That way
++ *    the local commit history is kept according to the reasoning
++ *    above, and the history remains stable if more vendor branch
++ *    imports are done. It also means that the whole vendor branch
++ *    history is copied to the normal branch in the common case when
++ *    there are no local commits.
++ *
++ * o  Regardless of the current branch setting, we can reasonably
++ *    assume that the vendor branch was default when it was created.
++ *    We should therefore mirror the import commits up to the first
++ *    local one.
++ *
++ *    A problem arise if there are several vendor branches at the same
++ *    branch point, since we don't really know which one was the
++ *    default at the time. We could use various clues and pick one
++ *    (e.g. the one that is current now, or the one which was first
++ *    imported and therefore caused the cvs implicit 1.1 commit), but
++ *    the current approach is to be cautious and pick none.
++ *
++ * This function handles these revision copies where appropriate.
++ */
++
++static void copy_vendor_branch_revs(CvsFile * file)
++{
++    /* We assume fix_rev_branches has been run. */
++
++    struct hash_entry * he;
++    char * vendor_branch, * parent_branch, * default_branch;
++    char parent_branch_rev[REV_STR_MAX];
++    CvsFileRevision * normal_rev, * vendor_rev, * rev;
++    time_t last_normal_rev_date;
++
++    assert(mirror_vendor_branches);
++    assert(file->vendor_branches);
++
++    default_branch = get_hash_object(file->branches, file->default_branch_rev);
++
++    /* Check if there is a phony 1.1 commit for an initial import on a
++     * vendor branch. If so, convert it to a mirror commit of the
++     * initial vendor revision. Do this even if the vendor branch
++     * isn't mirrored, since cvs will have the same content on both
++     * branches in any case.
+      *
+-     */
+-    if (!get_branch(pre, post))
++     * Note that in join_vendor_branch_initial_commit the initial
++     * vendor commit gets joined with the normal branch copy, but
++     * then it's done on a coalesced patch set. It cannot be done
++     * here since it wouldn't work if more files got added to a
++     * vendor branch long after the branch point. */
++
++    normal_rev = (CvsFileRevision *)get_hash_object(file->revisions, "1.1");
++    if (normal_rev && normal_rev->branches)
+     {
+-	set_psm_initial(psm);
++	CvsFileRevision * init_mirrored_rev = NULL;
++
++	/* rev is considered to be a phony commit if there is an
++	 * initial revision on a vendor branch that changes nothing.
++	 * The timestamps are usually the same too, but differences of
++	 * a few seconds are known to occur. */
++	reset_hash_iterator(normal_rev->branches);
++	while ((he = next_hash_entry(normal_rev->branches)))
++	{
++	    CvsFileRevision * branch_rev = (CvsFileRevision *) he->he_obj;
++	    if (branch_rev != NO_REVISION &&
++		branch_rev->empty_commit && !branch_rev->dead &&
++		get_hash_object(file->vendor_branches, branch_rev->branch))
++	    {
++		PatchSetMember * normal_psm = normal_rev->post_psm;
++		PatchSetMember * branch_psm = branch_rev->post_psm;
++
++		/* Should have single-member patch sets here. */
++		assert(normal_psm->ps->members.next == &normal_psm->link);
++		assert(normal_psm->ps->members.prev == &normal_psm->link);
++		assert(branch_psm->ps->members.next == &branch_psm->link);
++		assert(branch_psm->ps->members.prev == &branch_psm->link);
++
++		debug(DEBUG_STATUS, "vendor branch mirror of initial commit "
++		      "for %s: changing rev %s on %s to %s",
++		      file->filename, normal_rev->rev, normal_rev->branch,
++		      branch_rev->rev);
++
++		setup_rev_copy(branch_rev, normal_rev);
++
++		remove_hash_object(file->revisions, normal_rev->rev);
++		normal_rev->rev = branch_rev->rev;
++		normal_psm->ps->date = normal_psm->date = branch_psm->date;
++		free(normal_psm->ps->descr);
++		normal_psm->ps->descr = xstrdup(branch_psm->ps->descr);
++		/* Author should be the same, but who knows.. */
++		normal_psm->ps->author = branch_psm->ps->author;
++
++		/* Move branches to the copy. See copy_vendor_rev
++		 * for rationale. */
++		move_branches(branch_rev, normal_rev);
++
++		branch_psm->pre_rev = NULL;
++
++		/* Should no longer consider branch_rev to fork off
++		 * normal_rev. If there are other branches that fork
++		 * off we need to keep them though. */
++		remove_hash_object(normal_rev->branches, he->he_key);
++		reset_hash_iterator(normal_rev->branches);
++		if (!next_hash_entry(normal_rev->branches))
++		{
++		    destroy_hash_table(normal_rev->branches, NULL);
++		    normal_rev->branches = NULL;
++		}
++
++		/* Remember so we can jump past this mirrored commit
++		 * in the next step. */
++		init_mirrored_rev = branch_rev;
++		break;
++	    }
++	}
++
++	/* If there's a single vendor branch then mirror its commits
++	 * up to the first local commit. */
++
++	/* init_mirrored_rev has been removed from normal_rev->branches
++	 * above but we should still consider it. */
++	vendor_rev = init_mirrored_rev;
++	if (normal_rev->branches)
++	{
++	    reset_hash_iterator(normal_rev->branches);
++	    while ((he = next_hash_entry(normal_rev->branches)))
++	    {
++		CvsFileRevision * branch_rev = (CvsFileRevision *) he->he_obj;
++		if (branch_rev != NO_REVISION &&
++		    get_hash_object(file->vendor_branches, branch_rev->branch))
++		{
++		    if (vendor_rev)
++		    {
++			/* Got more than one vendor branch. Don't know which
++			 * one to mirror, so do nothing. */
++			vendor_rev = NULL;
++			break;
++		    }
++		    vendor_rev = branch_rev;
++		}
++	    }
++	}
++
++	if (vendor_rev)
++	{
++	    CvsFileRevision * prev = normal_rev;
++
++	    /* Set normal_rev to the first local commit which we
++	     * should stop at. If there is no local commit then we
++	     * skip this and do the work below instead, since we
++	     * should pay heed to the default branch in that case. */
++	    normal_rev = normal_rev->pre_psm ? normal_rev->pre_psm->post_rev : NULL;
++	    if (normal_rev)
++	    {
++		time_t stop_date = normal_rev->post_psm->date;
++		if (vendor_rev == init_mirrored_rev)
++		{
++		    /* Step past the initial commit mirrored above. */
++		    vendor_rev = vendor_rev->pre_psm ? vendor_rev->pre_psm->post_rev : NULL;
++		}
++
++		for (; vendor_rev && vendor_rev->post_psm->date < stop_date;
++		     vendor_rev = vendor_rev->pre_psm ? vendor_rev->pre_psm->post_rev : NULL)
++		{
++		    debug(DEBUG_STATUS, "vendor branch mirror from beginning "
++			  "for %s: copying rev %s on %s to after %s on %s",
++			  file->filename, vendor_rev->rev, vendor_rev->branch,
++			  prev->rev, prev->branch);
++		    prev = copy_vendor_rev(vendor_rev, prev);
++		}
++	    }
++	}
++    }
++
++    /* Mirror from the end if a vendor branch is default. */
++
++    if (!default_branch ||
++	!get_hash_object(file->vendor_branches, default_branch))
++    {
++	/* No vendor branch is the default branch. Do nothing. */
+ 	return;
+     }
+-    
+-    psm->pre_rev = file_get_revision(psm->file, pre);
+-    list_add(&psm->post_rev->link, &psm->pre_rev->branch_children);
++    vendor_branch = default_branch;
++
++    get_branch(parent_branch_rev, file->default_branch_rev);
++    get_branch(parent_branch_rev, parent_branch_rev);
++    if (!strchr(parent_branch_rev, '.'))
++    {
++	parent_branch = head_branch;
++    }
++    else
++    {
++	parent_branch = get_hash_object(file->branches_sym, parent_branch_rev);
++	if (!parent_branch)
++	{
++	    /* Hmm, no name for the parent branch. */
++	    return;
++	}
++    }
++
++    normal_rev = (CvsFileRevision *)get_hash_object(file->branch_tips, parent_branch);
++    vendor_rev = (CvsFileRevision *)get_hash_object(file->branch_tips, vendor_branch);
++    assert(normal_rev);
++    assert(!normal_rev->pre_psm);
++
++    /* Go back to the first vendor revision to copy, and then copy
++     * them forwards. */
++
++    last_normal_rev_date = normal_rev->post_psm->date;
++    rev = vendor_rev;
++    vendor_rev = NULL;
++    while (1)
++    {
++	if (!rev || rev->branch != vendor_branch ||
++	    rev->post_psm->date <= last_normal_rev_date)
++	{
++	    /* Stopping on equal dates automatically avoids the
++	     * 1.1.x.1 revision which already might have been mirrored
++	     * to the parent branch. */
++	    break;
++	}
++
++	if (rev->post_psm->ps->members.next != rev->post_psm->ps->members.prev)
++	{
++	    /* Precaution if the cache is being updated with -u: If we
++	     * hit a patch set with more than one member then it was
++	     * read from the cache and we shouldn't go further. */
++	    break;
++	}
++
++	vendor_rev = rev;
++	rev = rev->post_psm->pre_rev;
++    }
++
++    for (; vendor_rev; vendor_rev = vendor_rev->pre_psm ? vendor_rev->pre_psm->post_rev : NULL)
++    {
++	debug(DEBUG_STATUS, "vendor branch mirror from end for %s: "
++	      "copying rev %s on %s to after %s on %s",
++	      file->filename, vendor_rev->rev, vendor_branch,
++	      normal_rev->rev, parent_branch);
++	normal_rev = copy_vendor_rev(vendor_rev, normal_rev);
++    }
++}
++
++/*
++ * Joins the (possibly disconnected) initial import patchset on a
++ * vendor branch with the copy on its (normal) parent branch, so that
++ * the vendor branch forks from the normal branch at that point.
++ */
++
++static void join_vendor_branch_initial_commit(PatchSet * ps)
++{
++    PatchSetMember * psm = list_entry(ps->members.next, PatchSetMember, link);
++
++    assert(track_branch_ancestry);
++    assert(!list_empty(&ps->members));
++
++    if (psm->post_rev->copy_of)
++    {
++	struct list_head * l;
++	/* try_merge_patch_set ensures all members are copies of
++	 * members of the same patch set. */
++	PatchSet * orig_ps = psm->post_rev->copy_of->post_psm->ps;
++	Branch * branch = (Branch *)get_hash_object(branches, orig_ps->branch);
++	int is_initial_branch_ps = 1;
++
++	assert(orig_ps->psid < ps->psid);
++
++	/* Check if all members are initial empty revisions. In that
++	 * case we take it as the initial commit on a vendor branch,
++	 * which we should join with the normal branch copy in ps, so
++	 * that the vendor branch forks from it. */
++
++	for (l = orig_ps->members.next; l != &orig_ps->members; l = l->next)
++	{
++	    PatchSetMember * orig_psm = list_entry(l, PatchSetMember, link);
++	    CvsFileRevision * orig_rev = orig_psm->post_rev;
++	    if (!orig_rev->empty_commit || orig_psm->pre_rev)
++	    {
++		is_initial_branch_ps = 0;
++		break;
++	    }
++	}
++
++	if (is_initial_branch_ps)
++	{
++	    PatchSet * next_ps = NULL;
++
++	    debug(DEBUG_STATUS, "merging initial vendor branch ps %d into %d",
++		  orig_ps->psid, ps->psid);
++
++	    if (branch->ps)
++		list_del(&branch->link);
++	    branch->ps = ps;
++	    list_add(&branch->link, ps->branches.prev);
++
++	    for (l = orig_ps->tags.next; l != &orig_ps->tags;)
++	    {
++		struct list_head * l_next = l->next;
++		GlobalSymbol * sym = list_entry(l, GlobalSymbol, link);
++		sym->ps = ps;
++		list_del(&sym->link);
++		list_add(&sym->link, ps->tags.prev);
++		l = l_next;
++	    }
++
++	    for (l = orig_ps->branches.next; l != &orig_ps->branches; l = l->next)
++	    {
++		Branch * branch = list_entry(l, Branch, link);
++		branch->ps = ps;
++	    }
++	    list_splice(&orig_ps->branches, ps->branches.prev);
++	    INIT_LIST_HEAD(&orig_ps->branches);
++
++	    for (l = ps->members.next; l != &ps->members; l = l->next)
++	    {
++		PatchSetMember * orig_psm, * next_psm;
++		CvsFileRevision * rev, * orig_rev;
++		psm = list_entry(l, PatchSetMember, link);
++		rev = psm->post_rev;
++		assert(rev->copy_of);
++		orig_psm = psm->post_rev->copy_of->post_psm;
++		assert(orig_psm->ps == orig_ps);
++		orig_rev = orig_psm->post_rev;
++		next_psm = orig_rev->pre_psm;
++
++		/* The branches should have been moved to the copy -
++		 * see copy_vendor_branch_revs. */
++		assert(!orig_rev->branches);
++
++		if (!rev->branches)
++		    rev->branches = create_hash_table(3);
++		put_hash_object_ex(rev->branches, orig_rev->branch,
++				   next_psm ? next_psm->post_rev : NO_REVISION,
++				   HT_NO_KEYCOPY, NULL, NULL);
++
++		move_tags(orig_rev, rev);
++
++		if (next_psm)
++		{
++		    next_psm->pre_rev = rev;
++		    next_ps = next_psm->ps;
++		}
++
++		rev->copy_of = NULL;
++		orig_psm->pre_rev = NULL;
++		orig_rev->pre_psm = NULL;
++		rev->vendor_branch_joined = 1;
++
++		list_del(&orig_psm->link);
++		free_cvsfile_rev(orig_rev);
++		free(orig_psm);
++	    }
++
++	    if (next_ps)
++		next_ps->ancestor_branch = ps->branch;
++
++	    /* The old patch set should be empty now, but keep it in
++	     * case it isn't. */
++	    if (list_empty(&orig_ps->members))
++		free_patch_set(orig_ps);
++	    else
++		debug(DEBUG_STATUS, "keeping disconnected initial "
++		      "patch set %p since it isn't empty", orig_ps);
++	}
++    }
++}
++
++/* Global state necessary to use with twalk(3), since it doesn't
++ * propagate any context pointer. */
++static PatchSet * walk_prev_ps;
++
++static void fix_patch_set_cmp_dates_walker(const void * v_ps, const VISIT which, const int depth)
++{
++    PatchSet * ps = *(PatchSet **)v_ps;
++
++    if (which == postorder || which == leaf)
++    {
++	PatchSetMember * psm;
++
++	assert(ps->members.next != &ps->members);
++	psm = list_entry(ps->members.next, PatchSetMember, link);
++
++	debug(DEBUG_STATUS,
++	      "walking ps %p: author %s, branch %s, file %s, rev %s",
++	      ps, ps->author, ps->branch,
++	      psm->file->filename, psm->post_rev->rev);
++
++	/* Walking the list sorted by (filename, post_rev). Set
++	 * cmp_date in each entry so that it is guaranteed to be
++	 * monotonically increasing for each revision of the same
++	 * file:
++	 *
++	 * o  The default is to use the commit date for cmp_date.
++	 *
++	 * o  If the date for a later commit of a file is before that
++	 *    of an earlier commit (due to some kind of clock
++	 *    flakiness or whatever), use the same date as the earlier
++	 *    one for cmp_date.
++	 *
++	 * o  If the date for a commit is the same as an earlier
++	 *    commit, step cmp_date.tv_usec to ensure order.
++	 *
++	 * Later we'll use cmp_date to sort all commits on the same
++	 * branch chronologically, and then apply the time fuzz window
++	 * (on the real dates) to find patch sets.
++	 *
++	 * In the degenerate case that all dates in all commits in the
++	 * repo were the same value, this approach would have bad time
++	 * complexity, but the patch sets would still be correct by
++	 * obeying the commit revision order for all files. (That can
++	 * be simulated with STRESS_TEST_REV_ORDER.)
++	 */
++
++	if (ps->cmp_date.tv_sec < 0)
++	{
++	    /* Only do this if the cmp_date isn't set already, i.e. if
++	     * the ps doesn't come from the cache. */
++	    assert(ps->cmp_date.tv_usec == 0);
++
++	    if (walk_prev_ps)
++	    {
++		PatchSetMember * prev_psm;
++
++		assert(walk_prev_ps->members.next != &walk_prev_ps->members);
++		prev_psm = list_entry(walk_prev_ps->members.next, PatchSetMember, link);
++
++		if (psm->file != prev_psm->file ||
++		    strcmp(ps->branch, walk_prev_ps->branch))
++		{
++		    if (ps->branch_rev[0] != 0 && psm->pre_rev)
++		    {
++			/* On a subbranch. Use the fork revision on
++			 * the parent branch as walk_prev_ps. We know
++			 * it already has been processed since
++			 * compare_patch_sets orders parent branches
++			 * before their children. */
++			walk_prev_ps = psm->pre_rev->post_psm->ps;
++			debug(DEBUG_STATUS, "beginning at %p rev %s "
++			      "on parent branch %s with cmp_date %ld.%ld",
++			      walk_prev_ps,
++			      list_entry(walk_prev_ps->members.next, PatchSetMember, link)->post_rev->rev,
++			      walk_prev_ps->branch,
++			      walk_prev_ps->cmp_date.tv_sec,
++			      walk_prev_ps->cmp_date.tv_usec);
++			assert(psm->file ==
++			       list_entry(walk_prev_ps->members.next,
++					  PatchSetMember, link)->file);
++		    }
++		    else
++		    {
++			walk_prev_ps = NULL;
++		    }
++		}
++	    }
++
++	    if (!walk_prev_ps)
++	    {
++#ifdef STRESS_TEST_REV_ORDER
++		ps->cmp_date.tv_sec = 0;
++#else
++		ps->cmp_date.tv_sec = ps->date;
++#endif
++		debug(DEBUG_STATUS, "set cmp_date to %ld.0",
++		      ps->cmp_date.tv_sec);
++	    }
++	    else
++	    {
++		if (ps->date < walk_prev_ps->cmp_date.tv_sec)
++		{
++		    /* Should perhaps warn for out-of-order dates
++		     * here, but then we really ought to compare with
++		     * the previous rev regardless of author. */
++		    ps->cmp_date.tv_sec = walk_prev_ps->cmp_date.tv_sec;
++		    debug(DEBUG_STATUS, "set cmp_date to %ld from prev",
++			  ps->cmp_date.tv_sec);
++		}
++		else
++		{
++#ifdef STRESS_TEST_REV_ORDER
++		    ps->cmp_date.tv_sec = 0;
++#else
++		    ps->cmp_date.tv_sec = ps->date;
++#endif
++		    debug(DEBUG_STATUS,
++			  "set cmp_date to %ld (not lower than prev %ld)",
++			  ps->cmp_date.tv_sec, walk_prev_ps->cmp_date.tv_sec);
++		}
++
++		if (ps->cmp_date.tv_sec == walk_prev_ps->cmp_date.tv_sec)
++		{
++		    ps->cmp_date.tv_usec = walk_prev_ps->cmp_date.tv_usec + 1;
++		    debug(DEBUG_STATUS,
++			  "stepped cmp_date.tv_usec to %ld",
++			  ps->cmp_date.tv_usec);
++		}
++	    }
++
++	    if (psm->post_rev->copy_of)
++	    {
++		/* If we are a copy of another commit then let's sort the
++		 * original before the copy. This also gets the order right
++		 * for Merges: headers to work. Let's just add a fairly large
++		 * displacement in tv_usec - the original might be on a branch
++		 * we haven't visited yet but this should leave plenty of room
++		 * for tv_usec sequencing on that branch. */
++		if (ps->cmp_date.tv_usec < 500000)
++		    ps->cmp_date.tv_usec = 500000;
++	    }
++	}
++
++	walk_prev_ps = ps;
++
++	list_add(&ps->all_link, all_patch_sets.prev);
++    }
++}
++
++static void fix_patch_set_cmp_dates()
++{
++    assert(!bkcvs);
++
++    walk_prev_ps = NULL;
++    twalk(ps_tree, fix_patch_set_cmp_dates_walker);
++}
++
++/* Global state necessary for try_merge_patch_set since
++ * walk_all_patch_sets doesn't propagate any context pointer. */
++static struct timeval last_cmp_date;
++
++/* Checks if the given patch set can be merged into a previous one on
++ * all_patch_sets, and if so, does it. */
++static void try_merge_patch_set(PatchSet * ps)
++{
++    struct list_head * i;
++    PatchSetMember * psm;
++    PatchSet * merge_ps = NULL;
++
++    assert(ps->members.next != &ps->members);
++    psm = list_entry(ps->members.next, PatchSetMember, link);
++
++    if (psm->link.next != &ps->members)
++    {
++	/* The patch set comes from the cache if this happens. Don't
++	 * try to merge it then. We might still go into the merge code
++	 * for cached patch sets with single members, but it doesn't
++	 * matter. */
++    }
++    else
++    {
++	CvsFileRevision * rev = psm->post_rev;
++	struct hash_table * tags = NULL, * branches = NULL;
++	int num_tags = 0;
++
++	debug(DEBUG_STATUS, "trying to merge ps %p: author %s, branch %s, "
++	      "file %s, rev %s, cmp_date %ld.%ld, date %ld",
++	      ps, ps->author, ps->branch, psm->file->filename,
++	      rev->rev, ps->cmp_date.tv_sec, ps->cmp_date.tv_usec,
++	      ps->date);
++
++	/* Can't merge if the revisions have different sets of tags or
++	 * emanating branches since that would make the "Tag:" or
++	 * "Branches:" headers on the patch set ambiguous. Make hash
++	 * tables to be able to compare somewhat efficiently. */
++
++	if (ps->tags.next != &ps->tags)
++	{
++	    tags = create_hash_table(31);
++	    for (i = ps->tags.next; i != &ps->tags; i = i->next)
++	    {
++		GlobalSymbol * sym = list_entry(i, GlobalSymbol, link);
++		put_hash_object_ex(tags, sym->tag, (void *) (size_t) 1, HT_NO_KEYCOPY, NULL, NULL);
++		num_tags++;
++	    }
++	}
++
++	if (ps->branches.next != &ps->branches)
++	{
++	    branches = create_hash_table(31);
++	    for (i = ps->branches.next; i != &ps->branches; i = i->next)
++	    {
++		Branch * branch = list_entry(i, Branch, link);
++		put_hash_object_ex(branches, branch->name, (void *) (size_t) 1, HT_NO_KEYCOPY, NULL, NULL);
++	    }
++	}
++
++	for (i = ps->all_link.prev; i != &all_patch_sets; i = i->prev)
++	{
++	    struct list_head * j;
++	    PatchSet * ps2 = list_entry(i, PatchSet, all_link);
++	    CvsFileRevision * rev2;
++
++	    assert(ps2->members.next != &ps2->members);
++	    rev2 = list_entry(ps2->members.next, PatchSetMember, link)->post_rev;
++
++	    debug(DEBUG_STATUS, "  compare with ps %p: author %s, branch %s, "
++		  "cmp_date %ld.%ld, min_date %ld, max_date %ld",
++		  ps2, ps2->author, ps2->branch,
++		  ps2->cmp_date.tv_sec, ps2->cmp_date.tv_usec,
++		  ps2->min_date, ps2->max_date);
++
++	    /* If ps2 is out of the fuzz time window then there's no
++	     * use searching anymore. */
++
++	    if (ps->cmp_date.tv_sec >
++		ps2->cmp_date.tv_sec + timestamp_fuzz_factor)
++		goto merge_search_done;
++
++	    /* Ensure same branch for the following checks. */
++	    if (ps->branch != ps2->branch)
++		continue;
++
++	    /* Don't continue if the patch set got tags or branches.
++	     * The merged set would only get invalid in that case. */
++
++	    if (ps2->tags.next != &ps2->tags ||
++		ps2->branches.next != &ps2->branches)
++		goto merge_search_done;
++
++	    /* Also, we cannot merge if ps2 contains an older revision of
++	     * the same file. */
++
++	    for (j = ps2->members.next; j != &ps2->members; j = j->next)
++	    {
++		PatchSetMember * psm2 = list_entry(j, PatchSetMember, link);
++		if (psm2->file == psm->file)
++		    goto merge_search_done;
++	    }
++
++	    if (ps->author != ps2->author)
++		continue;
++
++	    /* Don't merge if there are different copy_of relations -
++	     * that'd make the "Merges:" header ambiguous. Only need
++	     * to check one member rev since they are all the same. */
++
++	    if (!rev->copy_of)
++	    {
++		if (rev2->copy_of)
++		    continue;
++	    }
++	    else
++	    {
++		if (!rev2->copy_of)
++		    continue;
++		/* Note that the following test requires that the copy_of
++		 * patch sets have been coalesced earlier. The tv_usec
++		 * displacement in fix_patch_set_cmp_dates_walker ensures
++		 * that. */
++		if (rev->copy_of->post_psm->ps != rev2->copy_of->post_psm->ps)
++		    continue;
++	    }
++
++	    /* Require the actual date to be within the time fuzz
++	     * window too to consider a merge. */
++#ifndef STRESS_TEST_REV_ORDER
++	    if (ps->date <= ps2->min_date - timestamp_fuzz_factor ||
++		ps->date > ps2->max_date + timestamp_fuzz_factor)
++		continue;
++#endif
++
++	    if (strcmp(ps->descr, ps2->descr))
++		continue;
++
++	    /* Check that all our tags and emanating branches are
++	     * present on all members of the other patch set. */
++
++	    if (tags || branches)
++	    {
++		for (j = ps2->members.next; j != &ps2->members; j = j->next)
++		{
++		    CvsFileRevision * rev2 = list_entry(j, PatchSetMember, link)->post_rev;
++
++		    if (tags)
++		    {
++			struct list_head * l;
++			int count = 0;
++			for (l = rev2->tags.next;
++			     l != &rev2->tags && count < num_tags;
++			     l = l->next)
++			{
++			    Tag * tag = list_entry(l, Tag, rev_link);
++			    if (get_hash_object(tags, tag->tag))
++				count++;
++			}
++			if (count < num_tags)
++			    goto merge_search_next;
++		    }
++
++		    if (branches)
++		    {
++			struct hash_entry * he;
++			if (!rev2->branches)
++			    goto merge_search_next;
++			reset_hash_iterator(branches);
++			while ((he = next_hash_entry(branches)))
++			{
++			    if (!get_hash_object(rev2->branches, he->he_key))
++				goto merge_search_next;
++			}
++		    }
++		}
++	    }
++
++	    merge_ps = ps2;
++
++	merge_search_next:;
++	}
++
++merge_search_done:
++	if (tags)
++	    destroy_hash_table(tags, NULL);
++	if (branches)
++	    destroy_hash_table(branches, NULL);
++    }
++
++    if (merge_ps)
++    {
++	struct list_head * l;
++
++	/* Ok, let's merge. We know that merge_ps has no tags or
++	 * branch points since the loop above bails out before that. */
++
++	assert(!merge_ps->funk_factor);
++	assert(merge_ps->branches.next == &merge_ps->branches);
++	assert(merge_ps->tags.next == &merge_ps->tags);
++
++	if (ps->ancestor_branch)
++	{
++	    assert(!merge_ps->ancestor_branch);
++	    merge_ps->ancestor_branch = ps->ancestor_branch;
++	}
++
++	merge_ps->funk_factor = ps->funk_factor;
++
++	list_splice(&ps->branches, &merge_ps->branches);
++	for (l = merge_ps->branches.next; l != &merge_ps->branches; l = l->next)
++	{
++	    Branch * branch = list_entry(i, Branch, link);
++	    branch->ps = merge_ps;
++	}
++
++	list_splice(&ps->tags, &merge_ps->tags);
++	for (l = merge_ps->tags.next; l != &merge_ps->tags; l = l->next)
++	{
++	    GlobalSymbol * sym = list_entry(l, GlobalSymbol, link);
++	    sym->ps = merge_ps;
++	}
++
++	list_del(&psm->link);
++	patch_set_add_member(merge_ps, psm);
++
++	if (ps->date < merge_ps->min_date)
++	    merge_ps->min_date = ps->date;
++	if (ps->date > merge_ps->max_date)
++	    /* Let the date of the resulting patch set be the latest
++	     * of all the commits. That's generally the most useful
++	     * for working with the repo (e.g. with cvs update -D). */
++	    merge_ps->date = merge_ps->max_date = ps->date;
++
++	debug(DEBUG_STATUS, "merged ps %p into %p", ps, merge_ps);
++
++	list_del(&ps->all_link);
++	free(ps->descr);
++	free(ps);
++    }
++    else
++    {
++	/* Ensure that the merged patch sets got monotonically
++	 * increasing cmp_dates. */
++
++	assert(ps->cmp_date.tv_sec >= last_cmp_date.tv_sec);
++	if (ps->cmp_date.tv_sec > last_cmp_date.tv_sec)
++	{
++	    last_cmp_date.tv_sec = ps->cmp_date.tv_sec;
++	    last_cmp_date.tv_usec = 0;
++	    ps->cmp_date.tv_usec = 0;
++	}
++	else
++	{
++	    ps->cmp_date.tv_usec = ++last_cmp_date.tv_usec;
++	}
++    }
++}
++
++static void coalesce_patch_sets()
++{
++    assert(!bkcvs);
++    last_cmp_date.tv_sec = 0;
++    last_cmp_date.tv_usec = 0;
++    walk_all_patch_sets(try_merge_patch_set);
++}
++
++static int compare_patch_set_members(struct list_head *l1, struct list_head *l2)
++{
++    PatchSetMember * psm1 = list_entry(l1, PatchSetMember, link);
++    PatchSetMember * psm2 = list_entry(l2, PatchSetMember, link);
++
++    /* A patch set should never contain the same file twice. */
++    assert(psm1->file != psm2->file);
++
++    return strcmp(psm1->file->filename, psm2->file->filename);
++}
++
++static void sort_patch_set_members(PatchSet * ps)
++{
++    list_sort(&ps->members, compare_patch_set_members);
+ }
+ 
+ static void check_print_patch_set(PatchSet * ps)
+@@ -1438,6 +2640,24 @@ static void check_print_patch_set(PatchSet * ps)
+     fflush(stdout);
+ }
+ 
++static int compare_global_symbol_tags(struct list_head *l1, struct list_head *l2)
++{
++    GlobalSymbol * gs1 = list_entry(l1, GlobalSymbol, link);
++    GlobalSymbol * gs2 = list_entry(l2, GlobalSymbol, link);
++    return strcmp(gs1->tag, gs2->tag);
++}
++
++static char * tag_flag_descr(int tag_flags)
++{
++    if (tag_flags & TAG_BRANCH_FUNKY)
++	return "**BRANCH FUNKY**";
++    if (tag_flags & TAG_INVALID)
++	return "**INVALID**";
++    if (tag_flags & TAG_FUNKY)
++	return "**FUNKY**";
++    return "";
++}
++
+ static void print_patch_set(PatchSet * ps)
+ {
+     struct tm *tm;
+@@ -1454,19 +2674,66 @@ static void print_patch_set(PatchSet * ps)
+     printf("Date: %d/%02d/%02d %02d:%02d:%02d\n", 
+ 	   1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday, 
+ 	   tm->tm_hour, tm->tm_min, tm->tm_sec);
++#if 0
++    tm = localtime(&ps->cmp_date.tv_sec);
++    printf("CmpDate: %d/%02d/%02d %02d:%02d:%02d seq %ld\n",
++	   1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
++	   tm->tm_hour, tm->tm_min, tm->tm_sec, ps->cmp_date.tv_usec);
++#endif
+     printf("Author: %s\n", ps->author);
+-    printf("Branch: %s\n", ps->branch);
++
++    if (ps->branch[0] == '#')
++	/* The branch is nameless. Use this special name for all such
++	 * branches. */
++	printf("Branch: #CVSPS_NO_BRANCH\n");
++    else
++	printf("Branch: %s\n", ps->branch);
++
+     if (ps->ancestor_branch)
+ 	printf("Ancestor branch: %s\n", ps->ancestor_branch);
+-    printf("Tag: %s %s\n", ps->tag ? ps->tag : "(none)", tag_flag_descr[ps->tag_flags]);
+-    printf("Branches: ");
+-    for (next = ps->branches.next; next != &ps->branches; next = next->next) {
+-	Branch * branch = list_entry(next, Branch, link);
+-	if (next != ps->branches.next)
+-	    printf(",");
+-	printf("%s", branch->name);
++    if (ps->tags.next == &ps->tags)
++    {
++	printf("Tag: (none) \n");
++    }
++    else
++    {
++	list_sort(&ps->tags, compare_global_symbol_tags);
++	next = ps->tags.next;
++	do
++	{
++	    GlobalSymbol * sym = list_entry(next, GlobalSymbol, link);
++	    printf("Tag: %s %s\n", sym->tag, tag_flag_descr(sym->flags));
++	    next = next->next;
++	}
++	while (next != &ps->tags);
++    }
++    if (!list_empty(&ps->branches))
++    {
++	printf("Branches: ");
++	for (next = ps->branches.next; next != &ps->branches; next = next->next)
++	{
++	    Branch * branch = list_entry(next, Branch, link);
++	    if (next != ps->branches.next)
++		printf(",");
++	    printf("%s", branch->name);
++	}
++	printf("\n");
++    }
++    for (next = ps->members.next; next != &ps->members; next = next->next)
++    {
++	PatchSetMember * psm = list_entry(next, PatchSetMember, link);
++	if (psm->post_rev->copy_of)
++	{
++	    /* Assume all members are copies of the same patch set. */
++	    PatchSet * orig_ps = psm->post_rev->copy_of->post_psm->ps;
++	    if (orig_ps->psid < ps->psid)
++	    {
++		/* Sanity check: Don't make forward merge links. */
++		printf("Merges: %d\n", orig_ps->psid);
++	    }
++	    break;
++	}
+     }
+-    printf("\n");
+     printf("Log:\n%s\n", ps->descr);
+     printf("Members: \n");
+ 
+@@ -1494,40 +2761,47 @@ static void print_patch_set(PatchSet * ps)
+     printf("\n");
+ }
+ 
+-/* walk all the patchsets to assign monotonic psid, 
+- * and to establish  branch ancestry
++/* walk all the patchsets to assign monotonic psid
+  */
+ static void assign_patchset_id(PatchSet * ps)
+ {
+-    /*
+-     * Ignore the 'BRANCH ADD' patchsets 
+-     */
+-    if (!ps->branch_add)
+-    {
+-	ps_counter++;
+-	ps->psid = ps_counter;
++    ps_counter++;
++    ps->psid = ps_counter;
++}
++
++static void fix_branch_ancestry(PatchSet * ps)
++{
++    assert(track_branch_ancestry);
+ 	
+-	if (track_branch_ancestry && strcmp(ps->branch, "HEAD") != 0)
++    if (ps->branch_rev[0] &&	/* Not on HEAD. */
++	!get_hash_object(branch_heads, ps->branch))
++    {
++	Branch * branch = (Branch *)get_hash_object(branches, ps->branch);
++	if (branch->ps)
++	    ps->ancestor_branch = branch->ps->branch;
++	else
+ 	{
+-	    PatchSet * head_ps = (PatchSet*)get_hash_object(branch_heads, ps->branch);
+-	    if (!head_ps) 
+-	    {
+-		head_ps = ps;
+-		put_hash_object(branch_heads, ps->branch, head_ps);
+-	    }
+-	    
+-	    determine_branch_ancestor(ps, head_ps);
++	    /* Got a branch but no info on where to connect it. This can
++	     * happen if a branch tag is used on some files that are
++	     * created from scratch in that branch only, and the branch
++	     * isn't tagged anywhere else in the tree. Leave it
++	     * disconnected since anything else could be a lie.
++	     *
++	     * Most frequently this happens for vendor branches when
++	     * they are mirrored, but in that case the the initial
++	     * commit is joined later with the normal branch copy by
++	     * join_vendor_branch_initial_commit. */
+ 	}
++    }
+ 
+-	find_branch_points(ps);
++    put_hash_object_ex(branch_heads, ps->branch, ps, HT_NO_KEYCOPY, NULL, NULL);
+ 
+-    }
+-    else
+-    {
+-	ps->psid = -1;
+-    }
++    find_branch_points(ps);
+ }
+ 
++#if 0
++/* Not used anymore. */
++
+ static int compare_rev_strings(const char * cr1, const char * cr2)
+ {
+     char r1[REV_STR_MAX];
+@@ -1591,6 +2865,8 @@ static int compare_patch_sets_by_members(const PatchSet * ps1, const PatchSet *
+     return 0;
+ }
+ 
++#endif	/* 0 */
++
+ static int compare_patch_sets_bk(const void * v_ps1, const void * v_ps2)
+ {
+     const PatchSet * ps1 = (const PatchSet *)v_ps1;
+@@ -1606,59 +2882,97 @@ static int compare_patch_sets(const void * v_ps1, const void * v_ps2)
+ {
+     const PatchSet * ps1 = (const PatchSet *)v_ps1;
+     const PatchSet * ps2 = (const PatchSet *)v_ps2;
+-    long diff;
++    PatchSetMember * psm1, * psm2;
++    int d1, d2;
+     int ret;
+-    time_t d, min, max;
+ 
+-    /* We order by (author, descr, branch, members, date), but because of the fuzz factor
+-     * we treat times within a certain distance as equal IFF the author
+-     * and descr match.
++    if (ps1 == ps2)
++	return 0;
++
++    /* We order by (branch, filename, post_rev) to get a base for
++     * setting cmp_date in fix_patch_set_cmp_dates.
++     *
++     * filename and post_rev are for the single member we know that
++     * every patch set got here. (When loaded from the cache they
++     * might have more than one member. But in that case we already
++     * got cmp_dates, so all this is moot.)
++     *
++     * This order is to ensure the commit order is kept even if time
++     * stamps are messed up one way or the other. (Equal time stamps
++     * for several commits for the same file are known to occur in
++     * practice, even though cvs sleeps in most cases to ensure that
++     * doesn't happen. And besides, users might have had flaky, i.e.
++     * non-monotonic, time on their boxes for any number of reasons.)
++     *
++     * Even though the author and description are keys to coalescing
++     * patch sets we cannot use them for sorting since they can break
++     * the chronological order. Consider two files a.txt and b.txt
++     * with two commits each by the same author:
++     *
++     *   a.txt rev 1.17 got msg "fix"
++     *   a.txt rev 1.18 got msg "work"
++     *
++     *   b.txt rev 1.17 got msg "work"
++     *   b.txt rev 1.18 got msg "fix"
++     *
++     * If we'd use the commit message to group patch sets now we'd get
++     * the following two sets:
++     *
++     *   a.txt rev 1.17 got msg "fix"
++     *   b.txt rev 1.18 got msg "fix"
++     *
++     *   a.txt rev 1.18 got msg "work"
++     *   b.txt rev 1.17 got msg "work"
++     *
++     * There is no way to order these without breaking the
++     * chronological sequence for either file. Most authors luckily
++     * doesn't use such bad messages so the problem is not big in
++     * practice, but it does occur.
+      */
+ 
+-    ret = strcmp(ps1->author, ps2->author);
+-    if (ret)
+-	    return ret;
++    if (ps1->branch != ps2->branch)
++    {
++	/* Order first on dots in the branch revs since
++	 * fix_patch_set_cmp_dates must have parent branches before
++	 * their children to propagate cmp_date correctly. */
+ 
+-    ret = strcmp(ps1->descr, ps2->descr);
+-    if (ret)
+-	    return ret;
++	d1 = count_dots(ps1->branch_rev);
++	d2 = count_dots(ps2->branch_rev);
+ 
+-    ret = strcmp(ps1->branch, ps2->branch);
+-    if (ret)
+-	return ret;
++	if (d1 != d2)
++	    return d1 - d2;
+ 
+-    ret = compare_patch_sets_by_members(ps1, ps2);
+-    if (ret)
+-	return ret;
+-
+-    /* 
+-     * one of ps1 or ps2 is new.  the other should have the min_date
+-     * and max_date set to a window opened by the fuzz_factor
+-     */
+-    if (ps1->min_date == 0)
+-    {
+-	d = ps1->date;
+-	min = ps2->min_date;
+-	max = ps2->max_date;
+-    } 
+-    else if (ps2->min_date == 0)
+-    {
+-	d = ps2->date;
+-	min = ps1->min_date;
+-	max = ps1->max_date;
++	return strcmp(ps1->branch, ps2->branch);
+     }
+-    else
++
++    assert(ps1->members.next != &ps1->members);
++    assert(ps2->members.next != &ps2->members);
++    psm1 = list_entry(ps1->members.next, PatchSetMember, link);
++    psm2 = list_entry(ps2->members.next, PatchSetMember, link);
++
++    if (psm1->file != psm2->file)
+     {
+-	debug(DEBUG_APPERROR, "how can we have both patchsets pre-existing?");
+-	exit(1);
++	ret = strcmp(psm1->file->filename, psm2->file->filename);
++	assert(ret != 0);
++	return ret;
+     }
+ 
+-    if (min < d && d < max)
+-	return 0;
++    assert(psm1->post_rev->ord != psm2->post_rev->ord);
++    return psm1->post_rev->ord - psm2->post_rev->ord;
++}
+ 
+-    diff = ps1->date - ps2->date;
++static int compare_patch_sets_on_cmp_date(struct list_head * l1, struct list_head * l2)
++{
++    const PatchSet * ps1 = list_entry(l1, PatchSet, all_link);
++    const PatchSet * ps2 = list_entry(l2, PatchSet, all_link);
++    long diff;
++
++    diff = ps1->cmp_date.tv_sec - ps2->cmp_date.tv_sec;
++    if (diff)
++	return (diff < 0) ? -1 : 1;
+ 
+-    return (diff < 0) ? -1 : 1;
++    diff = ps1->cmp_date.tv_usec - ps2->cmp_date.tv_usec;
++    return (diff < 0) ? -1 : ((diff > 0) ? 1 : 0);
+ }
+ 
+ static int compare_patch_sets_bytime_list(struct list_head * l1, struct list_head * l2)
+@@ -1670,32 +2984,48 @@ static int compare_patch_sets_bytime_list(struct list_head * l1, struct list_hea
+ 
+ static int compare_patch_sets_bytime(const PatchSet * ps1, const PatchSet * ps2)
+ {
++    PatchSetMember * psm1, * psm2;
+     long diff;
+-    int ret;
+ 
+-    /* When doing a time-ordering of patchsets, we don't need to
+-     * fuzzy-match the time.  We've already done fuzzy-matching so we
+-     * know that insertions are unique at this point.
++    /* When doing a chronological order of patchsets, we don't need to
++     * fuzzy-match the time. The patch sets are already coalesced now.
+      */
+ 
+-    diff = ps1->date - ps2->date;
++    diff = ps1->cmp_date.tv_sec - ps2->cmp_date.tv_sec;
+     if (diff)
+ 	return (diff < 0) ? -1 : 1;
+ 
+-    ret = compare_patch_sets_by_members(ps1, ps2);
+-    if (ret)
+-	return ret;
++    diff = ps1->cmp_date.tv_usec - ps2->cmp_date.tv_usec;
++    if (diff)
++	return (diff < 0) ? -1 : 1;
+ 
+-    ret = strcmp(ps1->author, ps2->author);
+-    if (ret)
+-	return ret;
++    /* If we get here then the patch sets don't touch the same files.
++     * Disambiguate by comparing the first file in each member list.
++     *
++     * Note: This assumes the member lists are sorted by
++     * sort_patch_set_members.
++     */
+ 
+-    ret = strcmp(ps1->descr, ps2->descr);
+-    if (ret)
+-	return ret;
++    psm1 = list_entry(ps1->members.next, PatchSetMember, link);
++    psm2 = list_entry(ps2->members.next, PatchSetMember, link);
++
++#ifndef NDEBUG
++    if (psm1->file == psm2->file)
++    {
++	fprintf(stderr, "Got same cmp_date and file in two patch sets.\n"
++		"ps1 %p: author %s, branch %s, file %s, rev %s, cmp_date %ld.%ld\n"
++		"ps2 %p: author %s, branch %s, file %s, rev %s, cmp_date %ld.%ld\n",
++		ps1, ps1->author, ps1->branch,
++		psm1->file->filename, psm1->post_rev->rev,
++		ps1->cmp_date.tv_sec, ps1->cmp_date.tv_usec,
++		ps2, ps2->author, ps2->branch,
++		psm2->file->filename, psm2->post_rev->rev,
++		ps2->cmp_date.tv_sec, ps2->cmp_date.tv_usec);
++	abort();
++    }
++#endif
+ 
+-    ret = strcmp(ps1->branch, ps2->branch);
+-    return ret;
++    return strcmp(psm1->file->filename, psm2->file->filename);
+ }
+ 
+ 
+@@ -1928,26 +3258,35 @@ static CvsFileRevision * parse_revision(CvsFile * file, char * rev_str)
+ 	    p++;
+     *p = 0;
+ 
+-    return cvs_file_add_revision(file, rev_str);
++    return cvs_file_add_revision(file, rev_str, NULL);
+ }
+ 
+-CvsFileRevision * cvs_file_add_revision(CvsFile * file, const char * rev_str)
++CvsFileRevision * cvs_file_add_revision(CvsFile * file, const char * rev_str, const char * branch)
+ {
+     CvsFileRevision * rev;
++    int hash_rev = 0;
+ 
+-    if (!(rev = (CvsFileRevision*)get_hash_object(file->revisions, rev_str)))
+-    {
+-	rev = (CvsFileRevision*)calloc(1, sizeof(*rev));
+-	rev->rev = get_string(rev_str);
+-	rev->file = file;
+-	rev->branch = NULL;
+-	rev->present = 0;
+-	rev->pre_psm = NULL;
+-	rev->post_psm = NULL;
+-	INIT_LIST_HEAD(&rev->branch_children);
+-	INIT_LIST_HEAD(&rev->tags);
+-	
+-	put_hash_object_ex(file->revisions, rev->rev, rev, HT_NO_KEYCOPY, NULL, NULL);
++    /* If branch is given then look up/create a revision on that
++     * branch. Otherwise use the branch implied by the revision
++     * number. */
++
++    rev = (CvsFileRevision*)get_hash_object(file->revisions, rev_str);
++    if (branch)
++    {
++	if (rev && strcmp(rev->branch, branch))
++	    rev = NULL;
++	if (!rev && file->revision_copies)
++	{
++	    rev = (CvsFileRevision *)get_hash_object(file->revision_copies, rev_str);
++	    if (rev && strcmp(rev->branch, branch))
++		rev = NULL;
++	}
++    }
++
++    if (!rev)
++    {
++	rev = create_cvsfile_rev(file, rev_str);
++	hash_rev = 1;
+ 
+ 	debug(DEBUG_STATUS, "added revision %s to file %s", rev_str, file->filename);
+     }
+@@ -1966,6 +3305,7 @@ CvsFileRevision * cvs_file_add_revision(CvsFile * file, const char * rev_str)
+     if (!rev->branch && file->have_branches)
+     {
+ 	char branch_str[REV_STR_MAX];
++	char * rev_branch;
+ 
+ 	/* in the cvs cvs repository (ccvs) there are tagged versions
+ 	 * that don't exist.  let's mark every 'known to exist' 
+@@ -1980,23 +3320,67 @@ CvsFileRevision * cvs_file_add_revision(CvsFile * file, const char * rev_str)
+ 	    exit(1);
+ 	}
+ 	
+-	rev->branch = (char*)get_hash_object(file->branches, branch_str);
++	rev_branch = (char*)get_hash_object(file->branches, branch_str);
+ 	
+ 	/* if there's no branch and it's not on the trunk, blab */
+-	if (!rev->branch)
++	if (!rev_branch)
+ 	{
+ 	    if (get_branch(branch_str, branch_str))
+ 	    {
++		/* Got a branch with no name. Make a unique name for it so
++		 * that we don't try to make a single branch out of all the
++		 * nameless branches (some of them might in fact have been the
++		 * same named branch once, but we have no way of knowing). */
++		static int nameless_branch_counter = 0;
++		int c;
+ 		debug(DEBUG_APPMSG1, "WARNING: revision %s of file %s on unnamed branch", rev->rev, rev->file->filename);
+-		rev->branch = "#CVSPS_NO_BRANCH";
++		if (branch && sscanf(branch, "#CVSPS_NO_BRANCH_%d", &c))
++		{
++		    /* Read a #CVSPS_NO_BRANCH_* name from the cache. Let's
++		     * keep that name, but update our counter so that we won't
++		     * make duplicate names later. */
++		    if (c > nameless_branch_counter)
++			nameless_branch_counter = c;
++		    rev_branch = get_string(branch);
++		}
++		else
++		{
++		    char buf[REV_STR_MAX];
++		    sprintf(buf, "#CVSPS_NO_BRANCH_%d", ++nameless_branch_counter);
++		    rev_branch = get_string(buf);
++		}
+ 	    }
+ 	    else
+ 	    {
+-		rev->branch = "HEAD";
++		rev_branch = head_branch;
+ 	    }
+ 	}
+ 
+-	debug(DEBUG_STATUS, "revision %s of file %s on branch %s", rev->rev, rev->file->filename, rev->branch);
++	if (branch && strcmp(branch, rev_branch))
++	{
++	    /* Caller has requested a different branch than the true one,
++	     * so this is a copy to be hashed into file->revision_copies. */
++	    assert(hash_rev);
++	    hash_rev = -1;
++	    rev_branch = get_string(branch);
++	}
++
++	rev->branch = rev_branch;
++
++	debug(DEBUG_STATUS, "revision %s of file %s on branch %s (hash it: %d)", rev->rev, rev->file->filename, rev->branch, hash_rev);
++    }
++
++    if (hash_rev > 0)
++    {
++	put_hash_object_ex(file->revisions,
++			   rev->rev, rev, HT_NO_KEYCOPY, NULL, NULL);
++    }
++    else if (hash_rev < 0)
++    {
++	if (!file->revision_copies)
++	    file->revision_copies = create_hash_table(31);
++	put_hash_object_ex(file->revision_copies,
++			   rev->rev, rev, HT_NO_KEYCOPY, NULL, NULL);
+     }
+ 
+     return rev;
+@@ -2011,10 +3395,15 @@ CvsFile * create_cvsfile()
+     f->revisions = create_hash_table(53);
+     f->branches = create_hash_table(13);
+     f->branches_sym = create_hash_table(13);
++    f->branch_tips = create_hash_table(13);
++    f->branch_tails = create_hash_table(13);
++    f->vendor_branches = NULL;
++    f->revision_copies = NULL;
+     f->symbols = create_hash_table(253);
+     f->have_branches = 0;
+ 
+-    if (!f->revisions || !f->branches || !f->branches_sym)
++    if (!f->revisions || !f->branches || !f->branches_sym ||
++       !f->branch_tips || !f->branch_tails)
+     {
+ 	if (f->branches)
+ 	    destroy_hash_table(f->branches, NULL);
+@@ -2027,6 +3416,24 @@ CvsFile * create_cvsfile()
+     return f;
+ }
+ 
++static CvsFileRevision * create_cvsfile_rev(CvsFile * file, const char * rev_str)
++{
++    CvsFileRevision * rev;
++    rev = (CvsFileRevision*)calloc(1, sizeof(*rev));
++    rev->rev = get_string(rev_str);
++    rev->file = file;
++    rev->branch = NULL;
++    rev->present = 0;
++    rev->ord = 0;
++    rev->pre_psm = NULL;
++    rev->post_psm = NULL;
++    rev->copy_of = NULL;
++    rev->copied_to = NULL;
++    rev->branches = NULL;
++    INIT_LIST_HEAD(&rev->tags);
++    return rev;
++}
++
+ static PatchSet * create_patch_set()
+ {
+     PatchSet * ps = (PatchSet*)calloc(1, sizeof(*ps));;
+@@ -2035,23 +3442,97 @@ static PatchSet * create_patch_set()
+     {
+ 	INIT_LIST_HEAD(&ps->members);
+ 	INIT_LIST_HEAD(&ps->branches);
++	INIT_LIST_HEAD(&ps->tags);
+ 	ps->psid = -1;
+ 	ps->date = 0;
+-	ps->min_date = 0;
+-	ps->max_date = 0;
++	ps->cmp_date.tv_sec = -1;
++	ps->cmp_date.tv_usec = 0;
+ 	ps->descr = NULL;
+ 	ps->author = NULL;
+-	ps->tag = NULL;
+-	ps->tag_flags = 0;
+-	ps->branch_add = 0;
+ 	ps->funk_factor = 0;
+ 	ps->ancestor_branch = NULL;
+-	CLEAR_LIST_NODE(&ps->collision_link);
++	CLEAR_LIST_NODE(&ps->all_link);
+     }
+ 
+     return ps;
+ }
+ 
++static void free_cvsfile_rev(CvsFileRevision * rev)
++{
++    struct list_head * l;
++    CvsFile * file = rev->file;
++    CvsFileRevision * removed;
++
++    assert(!rev->pre_psm || rev->pre_psm->pre_rev != rev);
++
++    removed = remove_hash_object(file->revisions, rev->rev);
++    if (removed == rev)
++	{}
++    else
++    {
++	if (removed)
++	    put_hash_object_ex(file->revisions, removed->rev, removed,
++			       HT_NO_KEYCOPY, NULL, NULL);
++	if (file->revision_copies)
++	{
++	    removed = remove_hash_object(file->revision_copies, rev->rev);
++	    if (removed && removed != rev)
++		put_hash_object_ex(file->revision_copies, removed->rev, removed,
++				   HT_NO_KEYCOPY, NULL, NULL);
++	}
++    }
++
++    for (l = rev->tags.next; l != &rev->tags;)
++    {
++	struct list_head * l_next = l->next;
++	Tag * t = list_entry(l, Tag, rev_link);
++	assert(t->rev == rev);
++	remove_hash_object(file->symbols, t->tag);
++	list_del(&t->global_link);
++	free(t);
++	l = l_next;
++    }
++
++    if (rev->branches)
++	destroy_hash_table(rev->branches, NULL);
++
++    free(rev);
++}
++
++/*
++ * Frees a PatchSet, including its PatchSetMembers, their
++ * CvsFileRevisions, and any Tags for those. It's assumed that no
++ * other PatchSetMembers or CvsFileRevisions point to them. It's also
++ * assumed that the PatchSet doesn't have any GlobalSymbols or
++ * Branches.
++ *
++ * Note: It is not removed from ps_tree.
++ */
++static void free_patch_set(PatchSet * ps)
++{
++    struct list_head * l;
++
++    assert(list_empty(&ps->branches));
++    assert(list_empty(&ps->tags));
++
++    for (l = ps->members.next; l != &ps->members;)
++    {
++	struct list_head * l_next = l->next;
++	PatchSetMember * psm = list_entry(l, PatchSetMember, link);
++	CvsFileRevision * rev = psm->post_rev;
++	assert(psm->ps == ps);
++	assert(!psm->pre_rev || psm->pre_rev->pre_psm != psm);
++	free_cvsfile_rev(rev);
++	free(psm);
++	l = l_next;
++    }
++
++    free(ps->descr);
++    if (ps->all_link.next)
++	list_del(&ps->all_link);
++    free(ps);
++}
++
+ PatchSetMember * create_patch_set_member()
+ {
+     PatchSetMember * psm = (PatchSetMember*)calloc(1, sizeof(*psm));
+@@ -2059,6 +3540,7 @@ PatchSetMember * create_patch_set_member()
+     psm->post_rev = NULL;
+     psm->ps = NULL;
+     psm->file = NULL;
++    psm->date = 0;
+     psm->bad_funk = 0;
+     return psm;
+ }
+@@ -2069,18 +3551,34 @@ static PatchSetRange * create_patch_set_range()
+     return psr;
+ }
+ 
+-CvsFileRevision * file_get_revision(CvsFile * file, const char * r)
++CvsFileRevision * file_get_revision(CvsFile * file, const char * r, const char * branch)
+ {
+     CvsFileRevision * rev;
+ 
+     if (strcmp(r, "INITIAL") == 0)
+ 	return NULL;
+ 
++    /* If branch is given then look up/create a revision on that
++     * branch. Otherwise use the branch implied by the revision
++     * number. */
++
+     rev = (CvsFileRevision*)get_hash_object(file->revisions, r);
+     
++    if (branch)
++    {
++	if (rev && strcmp(rev->branch, branch))
++	    rev = NULL;
++	if (!rev && file->revision_copies)
++	{
++	    rev = (CvsFileRevision *)get_hash_object(file->revision_copies, r);
++	    if (rev && strcmp(rev->branch, branch))
++		rev = NULL;
++	}
++    }
++
+     if (!rev)
+     {
+-	debug(DEBUG_APPERROR, "request for non-existent rev %s in file %s", r, file->filename);
++	debug(DEBUG_APPERROR, "request for non-existent rev %s branch %s in file %s", r, branch ? branch : "n/a", file->filename);
+ 	exit(1);
+     }
+ 
+@@ -2136,7 +3634,7 @@ static void parse_sym(CvsFile * file, char * sym)
+ 	snprintf(rev, REV_STR_MAX, "%s.%d", rev2, leaf);
+ 	debug(DEBUG_STATUS, "got sym: %s for %s", tag, rev);
+ 	
+-	cvs_file_add_branch(file, rev, tag);
++	cvs_file_add_branch(file, rev, tag, 0);
+     }
+     else
+     {
+@@ -2145,13 +3643,13 @@ static void parse_sym(CvsFile * file, char * sym)
+ 
+ 	/* see cvs manual: what is this vendor tag? */
+ 	if (is_vendor_branch(rev))
+-	    cvs_file_add_branch(file, rev, tag);
++	    cvs_file_add_branch(file, rev, tag, 1);
+ 	else
+-	    cvs_file_add_symbol(file, rev, tag);
++	    cvs_file_add_symbol(file, rev, NULL, tag);
+     }
+ }
+ 
+-void cvs_file_add_symbol(CvsFile * file, const char * rev_str, const char * p_tag_str)
++void cvs_file_add_symbol(CvsFile * file, const char * rev_str, const char * branch, const char * p_tag_str)
+ {
+     CvsFileRevision * rev;
+     GlobalSymbol * sym;
+@@ -2160,8 +3658,12 @@ void cvs_file_add_symbol(CvsFile * file, const char * rev_str, const char * p_ta
+     /* get a permanent storage string */
+     char * tag_str = get_string(p_tag_str);
+ 
+-    debug(DEBUG_STATUS, "adding symbol to file: %s %s->%s", file->filename, tag_str, rev_str);
+-    rev = cvs_file_add_revision(file, rev_str);
++    if (get_hash_object(file->symbols, tag_str))
++	/* Avoid creating duplicate tags in -u mode. */
++	return;
++
++    debug(DEBUG_STATUS, "adding symbol to file: %s %s->%s on %s", file->filename, tag_str, rev_str, branch ? branch : "implicit branch");
++    rev = cvs_file_add_revision(file, rev_str, branch);
+     put_hash_object_ex(file->symbols, tag_str, rev, HT_NO_KEYCOPY, NULL, NULL);
+     
+     /*
+@@ -2174,6 +3676,7 @@ void cvs_file_add_symbol(CvsFile * file, const char * rev_str, const char * p_ta
+ 	sym->tag = tag_str;
+ 	sym->ps = NULL;
+ 	INIT_LIST_HEAD(&sym->tags);
++	sym->flags = 0;
+ 
+ 	put_hash_object_ex(global_symbols, sym->tag, sym, HT_NO_KEYCOPY, NULL, NULL);
+     }
+@@ -2186,7 +3689,7 @@ void cvs_file_add_symbol(CvsFile * file, const char * rev_str, const char * p_ta
+     list_add(&tag->rev_link, &rev->tags);
+ }
+ 
+-char * cvs_file_add_branch(CvsFile * file, const char * rev, const char * tag)
++char * cvs_file_add_branch(CvsFile * file, const char * rev, const char * tag, int is_vendor_branch)
+ {
+     char * new_tag;
+     char * new_rev;
+@@ -2204,7 +3707,13 @@ char * cvs_file_add_branch(CvsFile * file, const char * rev, const char * tag)
+ 
+     put_hash_object_ex(file->branches, new_rev, new_tag, HT_NO_KEYCOPY, NULL, NULL);
+     put_hash_object_ex(file->branches_sym, new_tag, new_rev, HT_NO_KEYCOPY, NULL, NULL);
+-    
++    if (is_vendor_branch)
++    {
++	if (!file->vendor_branches)
++	    file->vendor_branches = create_hash_table(3);
++	put_hash_object_ex(file->vendor_branches, new_tag, new_rev, HT_NO_KEYCOPY, NULL, NULL);
++    }
++
+     if (get_hash_object(branches, tag) == NULL) {
+ 	debug(DEBUG_STATUS, "adding new branch to branches hash: %s", tag);
+ 	Branch * branch = create_branch(tag);
+@@ -2222,10 +3731,6 @@ char * cvs_file_add_branch(CvsFile * file, const char * rev, const char * tag)
+  * it's possible that no tag is valid for all files 
+  * at a single point in time.  We check for that
+  * case though.
+- *
+- * Implementation: the most recent PatchSet containing
+- * a revision (post_rev) tagged by the symbol is considered
+- * the 'tagged' PatchSet.
+  */
+ 
+ static void resolve_global_symbols()
+@@ -2235,57 +3740,250 @@ static void resolve_global_symbols()
+     while ((he_sym = next_hash_entry(global_symbols)))
+     {
+ 	GlobalSymbol * sym = (GlobalSymbol*)he_sym->he_obj;
+-	PatchSet * ps;
+-	struct list_head * next;
++	PatchSet * latest_ps = NULL, * earliest_next_ps = NULL;
++	struct list_head * l;
+ 
+ 	debug(DEBUG_STATUS, "resolving global symbol %s", sym->tag);
+ 
++	if (mirror_vendor_branches)
++	{
++	    const char * branch = NULL;
++	    int got_mixed_branches = 0, got_copied_revs = 0;
++
++	    /* If we mirror vendor branches then check for and move tags
++	     * from the vendor branch revisions to their copies on the
++	     * normal branches. Tags which only exist on one branch (i.e.
++	     * the vendor branch) aren't moved because they are likely put
++	     * explicitly on it, according to cvs recommended import
++	     * practice. Other tags are probably put on what the user
++	     * considered the normal branch, since cvs in reality puts
++	     * them on active vendor branches in that case. */
++
++	    for (l = sym->tags.next; l != &sym->tags; l = l->next)
++	    {
++		Tag * tag = list_entry(l, Tag, global_link);
++		CvsFileRevision * rev = tag->rev;
++		if (rev->vendor_branch_joined)
++		    /* Ignore the rev if it's one where a vendor branch has
++		     * been joined into the normal branch, since it'll appear
++		     * on the normal branch even if the tag was put on the
++		     * vendor branch. */
++		    continue;
++		if (rev->copied_to)
++		{
++		    got_copied_revs = 1;
++		    if (got_mixed_branches)
++			break;
++		}
++		if (!branch)
++		    branch = rev->branch;
++		else if (branch != rev->branch)
++		{
++		    got_mixed_branches = 1;
++		    if (got_copied_revs)
++			break;
++		}
++	    }
++
++	    if (got_copied_revs && got_mixed_branches)
++	    {
++		for (l = sym->tags.next; l != &sym->tags; l = l->next)
++		{
++		    Tag * tag = list_entry(l, Tag, global_link);
++		    if (tag->rev->copied_to)
++		    {
++			CvsFileRevision * to_rev = tag->rev->copied_to;
++			tag->rev = to_rev;
++			put_hash_object_ex(to_rev->file->symbols, tag->tag, to_rev,
++					   HT_NO_KEYCOPY, NULL, NULL);
++			list_del(&tag->rev_link);
++			list_add(&tag->rev_link, to_rev->tags.prev);
++		    }
++		}
++	    }
++	}
++
+ 	/*
+-	 * First pass, determine the most recent PatchSet with a 
+-	 * revision tagged with the symbolic tag.  This is 'the'
+-	 * patchset with the tag
++	 * Determine the most recent PatchSet with a revision tagged
++	 * with the symbolic tag (latest_ps). Determine also the
++	 * oldest PatchSet that must be after the tag
++	 * (earliest_next_ps). If latest_ps < earliest_next_ps then
++	 * the tag is put on latest_ps, otherwise it might be wrong in
++	 * some way. In that case we'll later find the point between
++	 * earliest_next_ps and latest_ps where the wrongness is the
++	 * lowest.
+ 	 */
+ 
+-	for (next = sym->tags.next; next != &sym->tags; next = next->next)
++	for (l = sym->tags.next; l != &sym->tags;)
+ 	{
+-	    Tag * tag = list_entry(next, Tag, global_link);
++	    struct list_head * next = l->next;
++	    Tag * tag = list_entry(l, Tag, global_link);
+ 	    CvsFileRevision * rev = tag->rev;
+ 
+ 	    /* FIXME:test for rev->post_psm from DEBIAN. not sure how this could happen */
+ 	    if (!rev->present || !rev->post_psm)
+ 	    {
+-		struct list_head *tmp = next->prev;
+ 		debug(DEBUG_APPERROR, "revision %s of file %s is tagged but not present",
+ 		      rev->rev, rev->file->filename);
+-		/* FIXME: memleak */
+-		list_del(next);
+-		next = tmp;
+-		continue;
++		list_del(&tag->global_link);
++		list_del(&tag->rev_link);
++		free(tag);
+ 	    }
++	    else
++	    {
++		PatchSet * ps = rev->post_psm->ps;
++		PatchSet * next_ps = NULL;
++
++		/* Get the earliest patch set on any branch, since we
++		 * don't know yet which branch the tag eventually will
++		 * end up on. */
++		if (rev->pre_psm)
++		    next_ps = rev->pre_psm->ps;
++		if (rev->branches)
++		{
++		    struct hash_entry * he;
++		    reset_hash_iterator(rev->branches);
++		    while ((he = next_hash_entry(rev->branches)))
++		    {
++			CvsFileRevision * next_rev = (CvsFileRevision *) he->he_obj;
++			if (next_rev != NO_REVISION &&
++			    (!next_ps ||
++			     next_rev->post_psm->ps->psid < next_ps->psid))
++			    next_ps = next_rev->post_psm->ps;
++		    }
++		}
+ 
+-	    ps = rev->post_psm->ps;
++#if 1
++		debug(DEBUG_STATUS, "  psid range %d..%d for %s:%s on %s",
++		      ps->psid, next_ps ? next_ps->psid : -1,
++		      rev->file->filename, rev->rev, rev->branch);
++#endif
+ 
+-	    if (!sym->ps || ps->date > sym->ps->date)
+-		sym->ps = ps;
++		if (!latest_ps || ps->psid > latest_ps->psid)
++		    latest_ps = ps;
++
++		if (next_ps &&
++		    (!earliest_next_ps ||
++		     next_ps->psid < earliest_next_ps->psid))
++		    earliest_next_ps = next_ps;
++	    }
++
++	    l = next;
+ 	}
+-	
+-	/* convenience variable */
+-	ps = sym->ps;
+ 
+-	if (!ps)
++	debug(DEBUG_STATUS, "Tag %s: latest ps %d, earliest next ps %d",
++	      sym->tag, latest_ps->psid,
++	      earliest_next_ps ? earliest_next_ps->psid : -1);
++
++	if (earliest_next_ps && latest_ps->psid >= earliest_next_ps->psid)
+ 	{
+-	    debug(DEBUG_APPERROR, "no patchset for tag %s", sym->tag);
+-	    return;
++	    /* Might have funky business. It could also be that
++	     * earliest_next_ps is a false alarm that is after a
++	     * branch point: Suppose a tag T is on branch B forked
++	     * from A at time t. earliest_next_ps might be a commit on
++	     * A after t but before T.
++	     *
++	     * Here we traverse patch sets backwards from latest_ps
++	     * and only count funkiness along the branch line that
++	     * contains the current patch set. We can therefore arrive
++	     * at funky count zero when ignoring revisions on parent
++	     * branches after forks.
++	     *
++	     * We can always stop looking at earliest_next_ps. If
++	     * earliest_next_ps is on a branch that can be ignored
++	     * then there would only be another later patch set that
++	     * we would have considered as earliest_next_ps
++	     * instead. */
++
++	    PatchSet * ps = latest_ps, * best_ps = ps;
++	    unsigned best_branch_funky_count = ~0, best_funky_count = ~0;
++
++	    for (; ps->psid >= earliest_next_ps->psid;
++		 ps = list_entry(ps->all_link.prev, PatchSet, all_link))
++	    {
++		int cur_psid = ps->psid;
++		char * cur_branch = ps->branch;
++		unsigned branch_funky_count = 0, funky_count = 0;
++
++		for (l = sym->tags.next; l != &sym->tags; l = l->next)
++		{
++		    Tag * tag = list_entry(l, Tag, global_link);
++		    CvsFileRevision * rev = tag->rev;
++		    CvsFileRevision * next_rev = rev_follow_branch(rev, cur_branch);
++		    PatchSet * rev_ps = rev->post_psm->ps;
++
++		    if (!next_rev)
++		    {
++			/* The rev is on a different branch. */
++			branch_funky_count++;
++			if (branch_funky_count > best_branch_funky_count)
++			    break;
++			continue;
++		    }
++
++		    if (/* Tagged rev too late? */
++			rev_ps->psid > cur_psid ||
++			/* Next rev too early? */
++			(next_rev != NO_REVISION &&
++			 next_rev->post_psm->ps->psid <= cur_psid))
++		    {
++			funky_count++;
++			if (funky_count > best_funky_count &&
++			    branch_funky_count == best_branch_funky_count)
++			    break;
++		    }
++		}
++
++		debug(DEBUG_STATUS, "  ps %d on %s: branch funky count %u, funky count %u",
++		      cur_psid, cur_branch, branch_funky_count, funky_count);
++
++		if (branch_funky_count < best_branch_funky_count ||
++		    (branch_funky_count == best_branch_funky_count &&
++		     funky_count < best_funky_count))
++		{
++		    best_ps = ps;
++		    best_branch_funky_count = branch_funky_count;
++		    best_funky_count = funky_count;
++		    if (best_branch_funky_count == 0 && best_funky_count == 0)
++			break;
++		}
++	    }
++
++	    debug(DEBUG_STATUS, "best ps is %d with branch funky count %u and funky count %u",
++		  best_ps->psid, best_branch_funky_count, best_funky_count);
++
++	    latest_ps = best_ps;
++	    if (best_branch_funky_count != 0)
++		sym->flags |= TAG_BRANCH_FUNKY;
++	    if (best_funky_count != 0)
++		sym->flags |= TAG_FUNKY;
+ 	}
+ 
+-	ps->tag = sym->tag;
++	sym->ps = latest_ps;
++	list_add(&sym->link, latest_ps->tags.prev);
++    }
++}
++
++static void check_global_symbols()
++{
++    struct hash_entry * he_sym;
++    reset_hash_iterator(global_symbols);
++    while ((he_sym = next_hash_entry(global_symbols)))
++    {
++	GlobalSymbol * sym = (GlobalSymbol*)he_sym->he_obj;
++	PatchSet * ps = sym->ps;
++	struct list_head * next;
++
++	debug(DEBUG_STATUS, "checking global symbol %s", sym->tag);
++
++	assert(ps);
+ 
+ 	/* check if this ps is one of the '-r' patchsets */
+-	if (restrict_tag_start && strcmp(restrict_tag_start, ps->tag) == 0)
++	if (restrict_tag_start && strcmp(restrict_tag_start, sym->tag) == 0)
+ 	    restrict_tag_ps_start = ps->psid;
+ 
+ 	/* the second -r implies -b */
+-	if (restrict_tag_end && strcmp(restrict_tag_end, ps->tag) == 0)
++	if (restrict_tag_end && strcmp(restrict_tag_end, sym->tag) == 0)
+ 	{
+ 	    restrict_tag_ps_end = ps->psid;
+ 
+@@ -2305,32 +4003,107 @@ static void resolve_global_symbols()
+ 	    }
+ 	}
+ 
+-	/* 
+-	 * Second pass. 
+-	 * check if this is an invalid patchset, 
+-	 * check which members are invalid.  determine
+-	 * the funk factor etc.
+-	 */
+-	for (next = sym->tags.next; next != &sym->tags; next = next->next)
++	if (sym->flags)
+ 	{
+-	    Tag * tag = list_entry(next, Tag, global_link);
+-	    CvsFileRevision * rev = tag->rev;
+-	    CvsFileRevision * next_rev = rev_follow_branch(rev, ps->branch);
+-	    
+-	    if (!next_rev)
+-		continue;
+-		
+-	    /*
+-	     * we want the 'tagged revision' to be valid until after
+-	     * the date of the 'tagged patchset' or else there's something
+-	     * funky going on
+-	     */
+-	    if (next_rev->post_psm->ps->date < ps->date)
++	    /* The tag is funky, invalid or branch funky. (An invalid
++	     * tag only occurs if a funky revision gets paired with
++	     * other revisions that aren't funky. I.e. it'd be trivial
++	     * to reduce all invalid patch sets to funky ones just by
++	     * splitting them, but that doesn't really help anything,
++	     * except possibly when -r is used.) */
++
++	    struct tm * tm;
++	    char * tag_branch = ps->branch;
++	    tm = localtime(&ps->date);
++
++	    if (sym->flags & TAG_BRANCH_FUNKY)
+ 	    {
+-		int flag = check_rev_funk(ps, next_rev);
+-		debug(DEBUG_STATUS, "file %s revision %s tag %s: TAG VIOLATION %s",
+-		      rev->file->filename, rev->rev, sym->tag, tag_flag_descr[flag]);
+-		ps->tag_flags |= flag;
++		debug(DEBUG_APPMSG1, "WARNING: Tag %s on PatchSet %d "
++		      "(%d/%02d/%02d %02d:%02d:%02d) on branch %s is branch funky:",
++		      sym->tag, ps->psid,
++		      1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
++		      tm->tm_hour, tm->tm_min, tm->tm_sec,
++		      tag_branch);
++
++		for (next = sym->tags.next; next != &sym->tags; next = next->next)
++		{
++		    Tag * tag = list_entry(next, Tag, global_link);
++		    CvsFileRevision * rev = tag->rev;
++		    if (!rev_follow_branch(rev, tag_branch))
++		    {
++			tm = localtime(&rev->post_psm->date);
++			debug(DEBUG_APPMSG1, "    Tagged rev on wrong branch %s: "
++			      "PatchSet %d, %s rev %s (%d/%02d/%02d %02d:%02d:%02d)",
++			      rev->branch, rev->post_psm->ps->psid,
++			      rev->file->filename, rev->rev,
++			      1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
++			      tm->tm_hour, tm->tm_min, tm->tm_sec);
++		    }
++		}
++	    }
++	    else
++	    {
++		debug(DEBUG_APPMSG1, "WARNING: Tag %s on PatchSet %d "
++		      "(%d/%02d/%02d %02d:%02d:%02d) is funky:",
++		      sym->tag, ps->psid,
++		      1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
++		      tm->tm_hour, tm->tm_min, tm->tm_sec);
++	    }
++
++	    if (sym->flags & TAG_FUNKY)
++	    {
++		for (next = sym->tags.next; next != &sym->tags; next = next->next)
++		{
++		    Tag * tag = list_entry(next, Tag, global_link);
++		    CvsFileRevision * rev = tag->rev;
++		    CvsFileRevision * next_rev = rev_follow_branch(rev, tag_branch);
++
++		    if (!next_rev)
++		    {
++			/* The rev is not on the right branch at all,
++			 * but we've reported that above. */
++			continue;
++		    }
++
++		    if (next_rev != NO_REVISION &&
++			next_rev->post_psm->ps->psid <= ps->psid)
++		    {
++			tm = localtime(&next_rev->post_psm->date);
++			debug(DEBUG_APPMSG1, "    Premature rev after the tag: "
++			      "PatchSet %d, %s rev %s (%d/%02d/%02d %02d:%02d:%02d)",
++			      next_rev->post_psm->ps->psid,
++			      next_rev->file->filename, next_rev->rev,
++			      1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
++			      tm->tm_hour, tm->tm_min, tm->tm_sec);
++		    }
++		}
++
++		for (next = sym->tags.next; next != &sym->tags; next = next->next)
++		{
++		    Tag * tag = list_entry(next, Tag, global_link);
++		    if (tag->rev->post_psm->ps->psid > ps->psid)
++		    {
++			tm = localtime(&tag->rev->post_psm->date);
++			debug(DEBUG_APPMSG1, "    Late rev with the tag: "
++			      "PatchSet %d, %s rev %s (%d/%02d/%02d %02d:%02d:%02d)",
++			      tag->rev->post_psm->ps->psid,
++			      tag->rev->file->filename, tag->rev->rev,
++			      1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
++			      tm->tm_hour, tm->tm_min, tm->tm_sec);
++		    }
++		}
++
++		for (next = sym->tags.next; next != &sym->tags; next = next->next)
++		{
++		    Tag * tag = list_entry(next, Tag, global_link);
++		    CvsFileRevision * rev = tag->rev;
++		    CvsFileRevision * next_rev = rev_follow_branch(rev, tag_branch);
++		    if (!next_rev)
++			continue;
++		    if (next_rev != NO_REVISION &&
++			next_rev->post_psm->ps->psid <= ps->psid)
++			sym->flags |= check_rev_funk(ps, next_rev, sym);
++		}
+ 	    }
+ 	}
+     }
+@@ -2401,17 +4174,6 @@ static int is_vendor_branch(const char * rev)
+ 
+ void patch_set_add_member(PatchSet * ps, PatchSetMember * psm)
+ {
+-    /* check if a member for the same file already exists, if so
+-     * put this PatchSet on the collisions list 
+-     */
+-    struct list_head * next;
+-    for (next = ps->members.next; next != &ps->members; next = next->next) 
+-    {
+-	PatchSetMember * m = list_entry(next, PatchSetMember, link);
+-	if (m->file == psm->file && ps->collision_link.next == NULL) 
+-		list_add(&ps->collision_link, &collisions);
+-    }
+-
+     psm->ps = ps;
+     list_add(&psm->link, ps->members.prev);
+ }
+@@ -2419,36 +4181,27 @@ void patch_set_add_member(PatchSet * ps, PatchSetMember * psm)
+ static void set_psm_initial(PatchSetMember * psm)
+ {
+     psm->pre_rev = NULL;
+-    if (psm->post_rev->dead)
+-    {
+-	/* 
+-	 * we expect a 'file xyz initially added on branch abc' here
+-	 * but there can only be one such member in a given patchset
+-	 */
+-	if (psm->ps->branch_add)
+-	    debug(DEBUG_APPMSG1, "WARNING: branch_add already set!");
+-	psm->ps->branch_add = 1;
+-    }
+ }
+ 
+ /* 
+  * look at all revisions starting at rev and going forward until 
+- * ps->date and see whether they are invalid or just funky.
++ * ps->psid and see whether they are invalid or just funky.
+  */
+-static int check_rev_funk(PatchSet * ps, CvsFileRevision * rev)
++static int check_rev_funk(PatchSet * ps, CvsFileRevision * rev, GlobalSymbol * sym)
+ {
+     int retval = TAG_FUNKY;
+ 
+-    while (rev)
++    while (rev && rev != NO_REVISION)
+     {
+ 	PatchSet * next_ps = rev->post_psm->ps;
+ 	struct list_head * next;
++	int no_msg = 1;
+ 
+-	if (next_ps->date > ps->date)
++	if (next_ps->psid > ps->psid)
+ 	    break;
+ 
+-	debug(DEBUG_STATUS, "ps->date %d next_ps->date %d rev->rev %s rev->branch %s", 
+-	      ps->date, next_ps->date, rev->rev, rev->branch);
++	debug(DEBUG_STATUS, "ps->psid %d next_ps->psid %d rev->rev %s rev->branch %s",
++	      ps->psid, next_ps->psid, rev->rev, rev->branch);
+ 
+ 	/*
+ 	 * If the ps->tag is one of the two possible '-r' tags
+@@ -2463,22 +4216,22 @@ static int check_rev_funk(PatchSet * ps, CvsFileRevision * rev)
+ 	 * Start assuming the HIDE/SHOW_ALL case, we will determine
+ 	 * below if we have a split ps case 
+ 	 */
+-	if (restrict_tag_start && strcmp(ps->tag, restrict_tag_start) == 0)
++	if (restrict_tag_start && strcmp(sym->tag, restrict_tag_start) == 0)
+ 	    next_ps->funk_factor = FNK_SHOW_ALL;
+-	if (restrict_tag_end && strcmp(ps->tag, restrict_tag_end) == 0)
++	if (restrict_tag_end && strcmp(sym->tag, restrict_tag_end) == 0)
+ 	    next_ps->funk_factor = FNK_HIDE_ALL;
+ 
+ 	/*
+-	 * if all of the other members of this patchset are also 'after' the tag
+-	 * then this is a 'funky' patchset w.r.t. the tag.  however, if some are
+-	 * before then the patchset is 'invalid' w.r.t. the tag, and we mark
+-	 * the members individually with 'bad_funk' ,if this tag is the
+-	 * '-r' tag.  Then we can actually split the diff on this patchset
++	 * if all of the other members of this patchset are also 'at' or 'after'
++	 * the tag then this is a 'funky' patchset w.r.t. the tag. however, if
++	 * some are before then the patchset is 'invalid' w.r.t. the tag, and we
++	 * mark the members individually with 'bad_funk' ,if this tag is the
++	 * '-r' tag. Then we can actually split the diff on this patchset
+ 	 */
+ 	for (next = next_ps->members.next; next != &next_ps->members; next = next->next)
+ 	{
+ 	    PatchSetMember * psm = list_entry(next, PatchSetMember, link);
+-	    if (before_tag(psm->post_rev, ps->tag))
++	    if (before_tag(psm->post_rev, sym->tag))
+ 	    {
+ 		retval = TAG_INVALID;
+ 		/* only set bad_funk for one of the -r tags */
+@@ -2488,11 +4241,19 @@ static int check_rev_funk(PatchSet * ps, CvsFileRevision * rev)
+ 		    next_ps->funk_factor = 
+ 			(next_ps->funk_factor == FNK_SHOW_ALL) ? FNK_SHOW_SOME : FNK_HIDE_SOME;
+ 		}
++		if (no_msg)
++		{
++		    struct tm * tm = localtime(&ps->date);
++		    debug(DEBUG_APPMSG1, "WARNING: Tag %s on PatchSet %d "
++			  "(%d/%02d/%02d %02d:%02d:%02d) is invalid:",
++			  sym->tag, ps->psid,
++			  1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
++			  tm->tm_hour, tm->tm_min, tm->tm_sec);
++		    no_msg = 0;
++		}
+ 		debug(DEBUG_APPMSG1, 
+-		      "WARNING: Invalid PatchSet %d, Tag %s:\n"
+-		      "    %s:%s=after, %s:%s=before. Treated as 'before'", 
+-		      next_ps->psid, ps->tag, 
+-		      rev->file->filename, rev->rev, 
++		      "    %s:%s=after, %s:%s=before. Treated as 'before'",
++		      rev->file->filename, rev->rev,
+ 		      psm->post_rev->file->filename, psm->post_rev->rev);
+ 	    }
+ 	}
+@@ -2511,7 +4272,7 @@ static int before_tag(CvsFileRevision * rev, const char * tag)
+ 
+     if (tagged_rev && 
+ 	revision_affects_branch(rev, tagged_rev->branch) && 
+-	rev->post_psm->ps->date <= tagged_rev->post_psm->ps->date)
++	rev->post_psm->ps->psid < tagged_rev->post_psm->ps->psid)
+ 	retval = 1;
+ 
+     debug(DEBUG_STATUS, "before_tag: %s %s %s %s %d", 
+@@ -2521,24 +4282,30 @@ static int before_tag(CvsFileRevision * rev, const char * tag)
+ }
+ 
+ /* get the next revision from this one following branch if possible */
+-/* FIXME: not sure if this needs to follow branches leading up to branches? */
++/* Returns NO_REVISION if the branch is found but no rev on it. */
+ static CvsFileRevision * rev_follow_branch(CvsFileRevision * rev, const char * branch)
+ {
+-    struct list_head * next;
+-
+     /* check for 'main line of inheritance' */
+-    if (strcmp(rev->branch, branch) == 0)
+-	return rev->pre_psm ? rev->pre_psm->post_rev : NULL;
++    if (rev->branch == branch)
++	return rev->pre_psm ? rev->pre_psm->post_rev : NO_REVISION;
+ 
+-    /* look down branches */
+-    for (next = rev->branch_children.next; next != &rev->branch_children; next = next->next)
++    if (rev->branches)
+     {
+-	CvsFileRevision * next_rev = list_entry(next, CvsFileRevision, link);
+-	//debug(DEBUG_STATUS, "SCANNING BRANCH CHILDREN: %s %s", next_rev->branch, branch);
+-	if (strcmp(next_rev->branch, branch) == 0)
++	CvsFileRevision * next_rev = (CvsFileRevision *) get_hash_object(rev->branches, branch);
++	if (next_rev)
+ 	    return next_rev;
+     }
+-    
++
++    /* The rev doesn't appear to exist on the given branch. But if the
++     * file doesn't have the branch tag at all then cvs puts the tag on
++     * HEAD (or possibly an active vendor branch, but if -V is used then
++     * it has been converted to HEAD by now). Let's report it as a
++     * missing rev in that case since the problem is with the branch tag
++     * and not this tag. */
++    if (rev->branch == head_branch &&
++	!get_hash_object(rev->file->branches_sym, branch))
++	return NO_REVISION;
++
+     return NULL;
+ }
+ 
+@@ -2556,10 +4323,10 @@ static void check_norc(int argc, char * argv[])
+     }
+ }
+ 
++#if 0
+ static void determine_branch_ancestor(PatchSet * ps, PatchSet * head_ps)
+ {
+     struct list_head * next;
+-    CvsFileRevision * rev;
+ 
+     /* PatchSet 1 has no ancestor */
+     if (ps->psid == 1)
+@@ -2575,7 +4342,8 @@ static void determine_branch_ancestor(PatchSet * ps, PatchSet * head_ps)
+     for (next = ps->members.next; next != &ps->members; next = next->next) 
+     {
+ 	PatchSetMember * psm = list_entry(next, PatchSetMember, link);
+-	rev = psm->pre_rev;
++	CvsFileRevision * rev = psm->post_rev;
++	CvsFileRevision * pre_rev = psm->pre_rev;
+ 	int d1, d2;
+ 
+ 	/* the reason this is at all complicated has to do with a 
+@@ -2597,11 +4365,13 @@ static void determine_branch_ancestor(PatchSet * ps, PatchSet * head_ps)
+ 	 * original branch-off-HEAD was created, so we have to keep
+ 	 * checking, ps after ps to be sure to get the deepest ancestor
+ 	 *
+-	 * note: rev is the pre-commit revision, not the post-commit
++	 * Note that pre_rev might be NULL for members that were
++	 * initially added on a branch.
+ 	 */
+ 	if (!head_ps->ancestor_branch)
+ 	    d1 = 0;
+-	else if (strcmp(ps->branch, rev->branch) == 0)
++	else if (pre_rev && strcmp(ps->branch, pre_rev->branch) == 0)
++	    /* Fast exit for revisions that aren't after forks. */
+ 	    continue;
+ 	else if (strcmp(head_ps->ancestor_branch, "HEAD") == 0)
+ 	    d1 = 1;
+@@ -2614,31 +4384,41 @@ static void determine_branch_ancestor(PatchSet * ps, PatchSet * head_ps)
+ 	/* HACK: we sometimes pretend to derive from the import branch.  
+ 	 * just don't do that.  this is the easiest way to prevent... 
+ 	 */
+-	d2 = (strcmp(rev->rev, "1.1.1.1") == 0) ? 0 : count_dots(rev->rev);
++	d2 = (pre_rev && strcmp(pre_rev->rev, "1.1.1.1") == 0) ? 0 : count_dots(rev->rev) - 2;
+ 	
+ 	if (d2 > d1)
+-	    head_ps->ancestor_branch = rev->branch;
++	{
++	    if (pre_rev)
++		head_ps->ancestor_branch = pre_rev->branch;
++	    else
++	    {
++		/* The file was initially added on this branch, so we
++		 * have no pre_rev to use. Have to find the parent
++		 * branch by chopping off dots and look it up. */
++		char ancestor_rev[REV_STR_MAX];
++		char *ancestor_branch;
++		get_branch(ancestor_rev, rev->rev);
++		get_branch(ancestor_rev, ancestor_rev);
++		ancestor_branch = (char *)get_hash_object(rev->file->branches, ancestor_rev);
++		head_ps->ancestor_branch = ancestor_branch ? ancestor_branch : head_branch;
++	    }
++	}
+ 
+  	//printf("-----> %d ancestry %s %s %s\n", ps->psid, ps->branch, head_ps->ancestor_branch, rev->file->filename);
+     }
+ }
+-
+-static void handle_collisions()
+-{
+-    struct list_head *next;
+-    for (next = collisions.next; next != &collisions; next = next->next) 
+-    {
+-	PatchSet * ps = list_entry(next, PatchSet, collision_link);
+-	printf("PatchSet %d has collisions\n", ps->psid);
+-    }
+-}
++#endif
+ 
+ void walk_all_patch_sets(void (*action)(PatchSet *))
+ {
+     struct list_head * next;;
+-    for (next = all_patch_sets.next; next != &all_patch_sets; next = next->next) {
++    for (next = all_patch_sets.next; next != &all_patch_sets;) {
++	/* Get next pointer before calling the action so it can free
++	 * the patch set if it wants to. */
++	struct list_head * next_next = next->next;
+ 	PatchSet * ps = list_entry(next, PatchSet, all_link);
+ 	action(ps);
++	next = next_next;
+     }
+ }
+ 
+@@ -2654,7 +4434,9 @@ static Branch * create_branch(const char * name)
+ static void find_branch_points(PatchSet * ps)
+ {
+     struct list_head * next;
+-    
++
++    debug(DEBUG_STATUS, "find branch points for %d", ps->psid);
++
+     /*
+      * for each member, check if the post-rev has any branch children.
+      * if so, the branch point for that branch cannot be earlier than this 
+@@ -2665,22 +4447,44 @@ static void find_branch_points(PatchSet * ps)
+     {
+ 	PatchSetMember * psm = list_entry(next, PatchSetMember, link);
+ 	CvsFileRevision * rev = psm->post_rev;
+-	struct list_head * child_iter;
+-
+-	for (child_iter = rev->branch_children.next; child_iter != &rev->branch_children; child_iter = child_iter->next) {
+-	    CvsFileRevision * branch_child = list_entry(child_iter, CvsFileRevision, link);
+-	    Branch * branch = get_hash_object(branches, branch_child->branch);
+-	    if (branch == NULL) {
+-		debug(DEBUG_APPERROR, "branch %s not found in global branch hash", branch_child->branch);
+-		return;
+-	    }
+-	    
+-	    if (branch->ps != NULL) {
+-		list_del(&branch->link);
+-	    }
+ 
+-	    branch->ps = ps;
+-	    list_add(&branch->link, ps->branches.prev);
++	if (rev->branches)
++	{
++	    struct hash_entry * he;
++
++	    reset_hash_iterator(rev->branches);
++	    while ((he = next_hash_entry(rev->branches)))
++	    {
++		Branch * branch = get_hash_object(branches, he->he_key);
++		if (branch == NULL) {
++		    debug(DEBUG_APPERROR, "branch %s not found in global branch hash", he->he_key);
++		    return;
++		}
++
++		if (branch->ps != NULL) {
++		    if (count_dots(branch->ps->branch_rev) > count_dots(ps->branch_rev))
++		    {
++			/* Don't override if we already got a more specific
++			 * branch. Let's say branch C is forked off B which is
++			 * forked off HEAD. If the file has had no changes on
++			 * B then it looks like it forks straight off HEAD to
++			 * C for that file, and that fork point will be later
++			 * than the C off B fork. The right thing to do in
++			 * this case is to just ignore this fork and keep the
++			 * old one. */
++			debug(DEBUG_STATUS, "  member %s %s forks branch %s, but already got more specific branch",
++			      rev->file->filename, rev->rev, he->he_key);
++			continue;
++		    }
++		    list_del(&branch->link);
++		}
++
++		debug(DEBUG_STATUS, "  member %s %s forks branch %s",
++		      rev->file->filename, rev->rev, he->he_key);
++
++		branch->ps = ps;
++		list_add(&branch->link, ps->branches.prev);
++	    }
+ 	}
+     }
+ 	
+diff --git a/cvsps.h b/cvsps.h
+index 280a253..d4efa70 100644
+--- a/cvsps.h
++++ b/cvsps.h
+@@ -16,18 +16,18 @@ typedef struct _CvsServerCtx CvsServerCtx;
+ #endif
+ 
+ extern struct hash_table * file_hash;
+-extern const char * tag_flag_descr[];
+ extern CvsServerCtx * cvs_direct_ctx;
+ extern char root_path[];
+ extern char repository_path[];
+ 
+ CvsFile * create_cvsfile();
+-CvsFileRevision * cvs_file_add_revision(CvsFile *, const char *);
+-void cvs_file_add_symbol(CvsFile * file, const char * rev, const char * tag);
+-char * cvs_file_add_branch(CvsFile *, const char *, const char *);
+-PatchSet * get_patch_set(const char *, const char *, const char *, const char *, PatchSetMember *);
++CvsFileRevision * cvs_file_add_revision(CvsFile *, const char *, const char *);
++void cvs_file_add_symbol(CvsFile * file, const char * rev, const char * branch, const char * tag);
++char * cvs_file_add_branch(CvsFile *, const char *, const char *, int);
++void update_branch_ends(CvsFileRevision * rev);
++PatchSet * get_patch_set(time_t, const char *, const char *, const char *, PatchSetMember *, const struct timeval *);
+ PatchSetMember * create_patch_set_member();
+-CvsFileRevision * file_get_revision(CvsFile *, const char *);
++CvsFileRevision * file_get_revision(CvsFile *, const char *, const char *);
+ void patch_set_add_member(PatchSet * ps, PatchSetMember * psm);
+ void walk_all_patch_sets(void (*action)(PatchSet *));
+ 
+diff --git a/cvsps_types.h b/cvsps_types.h
+index 10514e7..968dea1 100644
+--- a/cvsps_types.h
++++ b/cvsps_types.h
+@@ -6,6 +6,7 @@
+ #ifndef CVSPS_TYPES_H
+ #define CVSPS_TYPES_H
+ 
++#include <sys/time.h>
+ #include <time.h>
+ 
+ #define LOG_STR_MAX 32768
+@@ -23,50 +24,107 @@ typedef struct _GlobalSymbol GlobalSymbol;
+ typedef struct _Tag Tag;
+ typedef struct _Branch Branch;
+ 
++#define NO_REVISION ((CvsFileRevision *) (size_t) -1)
++
+ struct _CvsFileRevision
+ {
+     char * rev;
+-    int dead;
+     CvsFile * file;
+     char * branch;
+-    /*
+-     * In the cvs cvs repository (ccvs project) there are tagged
+-     * revisions that don't exist. track 'confirmed' revisions
+-     * so as to not let them screw us up.
+-     */
+-    int present;
+ 
+     /*
+      * A revision can be part of many PatchSets because it may
+      * be the branch point of many branches (as a pre_rev).  
+      * It should, however, be the 'post_rev' of only one 
+      * PatchSetMember.  The 'main line of inheritence' is
+-     * kept in pre_psm, and all 'branch revisions' are kept
+-     * in a list.
++     * kept in pre_psm.
+      */
+     PatchSetMember * pre_psm;
+     PatchSetMember * post_psm;
+-    struct list_head branch_children;
+-    
+-    /* 
+-     * for linking this 'first branch rev' into the parent branch_children
++
++    /*
++     * When a copy is made on another branch (for vendor branch
++     * mirroring), these link the copy and the original together.
+      */
+-    struct list_head link;
++    CvsFileRevision * copy_of, * copied_to;
++
++    /*
++     * Maps branch_sym to its earliest CvsFileRevision for all
++     * branches that emanate from this rev. If there is no revision on
++     * an emanating branch (i.e. we just got a branch tag) then the
++     * hash object value is NO_REVISION. NULL if no branches are
++     * forked from here. These hashes are built by fix_rev_branch_tags
++     * after the log for a file has been read.
++     */
++    struct hash_table *branches;
+ 
+     /*
+      * A list of all Tag structures tagging this revision
+      */
+     struct list_head tags;
++
++    /*
++     * Numbering that orders the revs within the branch in
++     * chronological commit order. The order is ascending, but numbers
++     * might be negative.
++     */
++    int ord;
++
++    unsigned dead: 1;
++
++    /*
++     * In the cvs cvs repository (ccvs project) there are tagged
++     * revisions that don't exist. track 'confirmed' revisions
++     * so as to not let them screw us up.
++     */
++    unsigned present: 1;
++
++    /*
++     * Set if the commit changed no lines. Used in some situations to
++     * detect implicit cvs commits.
++     */
++    unsigned empty_commit: 1;
++
++    /*
++     * Set if this revision is one where an initial vendor branch
++     * revision has been joined with the normal branch (by
++     * join_vendor_branch_initial_commit).
++     */
++    unsigned vendor_branch_joined: 1;
+ };
+ 
+ struct _CvsFile
+ {
+     char *filename;
++    char *default_branch_rev;
+     struct hash_table * revisions;    /* rev_str to revision [CvsFileRevision*] */
+     struct hash_table * branches;     /* branch to branch_sym [char*]           */
+     struct hash_table * branches_sym; /* branch_sym to branch [char*]           */
+     struct hash_table * symbols;      /* tag to revision [CvsFileRevision*]     */
+-    /* 
++
++    /*
++     * Maps branch_sym to the newest and oldest CvsFileRevision on
++     * each branch.
++     */
++    struct hash_table * branch_tips, * branch_tails;
++
++    /*
++     * This keeps track of the vendor branches among all branches.
++     * It's NULL as long as no vendor branch at all is found.
++     */
++    struct hash_table * vendor_branches; /* branch_sym to branch [char*] */
++
++    /*
++     * Same as the revisions hash table, but contains the copies of
++     * revisions that are created on other branches. This means that
++     * there can be no more than one copy of any revision (yes it's
++     * ugly, but it's enough to do what needs to be done). Common for
++     * all these copies is that they are not on the branch their
++     * revision numbers imply. NULL as long as there are no copies.
++     */
++    struct hash_table * revision_copies;
++
++    /*
+      * this is a hack. when we initially create entries in the symbol hash
+      * we don't have the branch info, so the CvsFileRevisions get created 
+      * with the branch attribute NULL.  Later we need to resolve these.
+@@ -81,6 +139,11 @@ struct _PatchSetMember
+     PatchSet * ps;
+     CvsFile * file;
+     /*
++     * This timestamp is to keep the exact date for this member since
++     * ps->date might change within the time fuzz window.
++     */
++    time_t date;
++    /*
+      * bad_funk is only set w.r.t the -r tags
+      */
+     int bad_funk;
+@@ -94,6 +157,7 @@ struct _PatchSetMember
+  */
+ #define TAG_FUNKY   0x1
+ #define TAG_INVALID 0x2
++#define TAG_BRANCH_FUNKY 0x4
+ 
+ /* values for funk_factor. they apply
+  * only to the -r tags, to patchsets
+@@ -109,22 +173,16 @@ struct _PatchSet
+ {
+     int psid;
+     time_t date;
+-    time_t min_date;
+-    time_t max_date;
++    time_t min_date;		/* Min date among the members. */
++    time_t max_date;		/* Max date among the members. */
++    struct timeval cmp_date;	/* Monotonically increasing wrt revs. */
+     char *descr;
+     char *author;
+-    char *tag;
+-    int tag_flags;
+     char *branch;
++    char *branch_rev;		/* The branch on its n.n.n.n.n form. "" in the head branch. */
+     char *ancestor_branch;
+     struct list_head members;
+-    /*
+-     * A 'branch add' patch set is a bogus patch set created automatically
+-     * when a 'file xyz was initially added on branch abc'
+-     * we want to ignore these.  fortunately, there's a way to detect them
+-     * without resorting to looking at the log message.
+-     */
+-    int branch_add;
++
+     /*
+      * If the '-r' option specifies a funky tag, we will need to detect the
+      * PatchSets that come chronologically before the tag, but are logically
+@@ -137,9 +195,11 @@ struct _PatchSet
+      */
+     struct list_head branches;
+ 
++    /* List of 'GlobalSymbol' objects that tag this patch set. */
++    struct list_head tags;
++
+     /* for putting onto a list */
+     struct list_head all_link;
+-    struct list_head collision_link;
+ };
+ 
+ struct _PatchSetRange
+@@ -154,6 +214,8 @@ struct _GlobalSymbol
+     char * tag;
+     PatchSet * ps;
+     struct list_head tags;
++    struct list_head link;
++    int flags;
+ };
+ 
+ struct _Tag
