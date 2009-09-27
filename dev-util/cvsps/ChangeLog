@@ -2,9 +2,9 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header: /var/cvsroot/gentoo-x86/dev-util/cvsps/ChangeLog,v 1.26 2008/06/10 18:17:10 armin76 Exp $
 
-*cvsps-2.2b1 (27 Sep 2009)
+*cvsps-2.2_beta1 (27 Sep 2009)
 
-  27 Sep 2009; Henrik Grubbström <grubba@grubba.org> cvsps-2.2b1.ebuild:
+  27 Sep 2009; Henrik Grubbström <grubba@grubba.org> cvsps-2.2_beta1.ebuild:
   New beta.
 
   10 Jun 2008; Raúl Porcel <armin76@gentoo.org> cvsps-2.1.ebuild:
