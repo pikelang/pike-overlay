@@ -22,7 +22,7 @@ S="${WORKDIR}/${MY_P}"
 src_unpack() {
 	unpack ${A}
 	cd "${S}"
-	epatch "${FILESDIR}"/${P}-build.patch
+	epatch "${FILESDIR}"/cvsps-2.1-build.patch
 }
 
 src_install() {
