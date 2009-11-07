@@ -45,7 +45,7 @@ DEPEND="dev-libs/nettle
 	zlib? ( sys-libs/zlib )"
 RDEPEND=""
 
-S=${WORKDIR}/Pike-v${PV}
+S=${WORKDIR}/Pike-v${MY_PV}
 
 src_compile() {
 	local myconf=""
