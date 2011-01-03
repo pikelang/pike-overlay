@@ -2,6 +2,11 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header: /var/cvsroot/gentoo-x86/dev-lang/pike/ChangeLog,v 1.33 2008/11/27 23:14:01 araujo Exp $
 
+*pike-7.8.524_alpha (03 Jan 2011)
+
+  03 Jan 2010: Henrik Grubbström <grubba@grubba.org> pike-7.8.524_aplha.ebuild:
+  Added the latest alpha.
+
 *pike-7.8.412_alpha (15 Feb 2010)
 
   15 Feb 2010; Henrik Grubbström <grubba@grubba.org> pike-7.8.412_alpha.ebuild:
