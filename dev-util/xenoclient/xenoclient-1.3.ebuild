@@ -19,7 +19,7 @@ S=${WORKDIR}/xenoclient
 
 src_compile() {
   econf || die
-  emake || die "Failed to build put."
+  emake put || die "Failed to build put."
 }
 
 src_install() {
