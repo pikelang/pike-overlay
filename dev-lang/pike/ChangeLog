@@ -5,6 +5,9 @@
 *pike-7.8.550_beta (17 Apr 2011)
 
   17 Apr 2011; Henrik Grubbström <grubba@grubba.org> pike-7.8.550_beta.ebuild:
+  Require Nettle 2.0 or earlier.
+
+  17 Apr 2011; Henrik Grubbström <grubba@grubba.org> pike-7.8.550_beta.ebuild:
   Added the latest beta.
 
 *pike-7.8.530_beta (13 Jan 2011)
