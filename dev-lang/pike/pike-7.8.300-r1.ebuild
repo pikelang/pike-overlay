@@ -27,7 +27,7 @@ DEPEND="<dev-libs/nettle-2
 	msql? ( dev-db/msql )
 	mysql? ( virtual/mysql )
 	odbc? ( dev-db/libiodbc )
-	opengl? ( virtual/opengl glut? ( virtual/glut ) )
+	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
 	pcre? ( dev-libs/libpcre )
 	pdf? ( media-libs/pdflib )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
