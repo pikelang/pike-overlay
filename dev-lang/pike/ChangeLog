@@ -1,6 +1,11 @@
 # ChangeLog for dev-lang/pike
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
-# $Header: /var/cvsroot/gentoo-x86/dev-lang/pike/ChangeLog,v 1.33 2008/11/27 23:14:01 araujo Exp $
+# $Header$
+
+*pike-7.8.696_beta (19 Jul 2012)
+
+  19 Jul 2012: Henrik Grubbström <grubba@grubba.org> pike-7.8.696_beta.ebuild:
+  Added the latest beta.
 
 *pike-7.8.694_beta (3 Jul 2012)
 
