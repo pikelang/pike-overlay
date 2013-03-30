@@ -3,6 +3,10 @@
 # $Header$
 
 *pike-7.8.700 (30 Mar 2013)
+  30 Mar 2013: Henrik Grubbström <grubba@grubba.org> *.ebuild:
+  The canonical URL for the Pike site has changed from
+  http://pike.ida.liu.se/ to http://pike.lysator.liu.se/.
+
   30 Mar 2013: Henrik Grubbström <grubba@grubba.org> pike-7.8.700.ebuild:
   Pike 7.8.700 has been out of beta for a while now.
 

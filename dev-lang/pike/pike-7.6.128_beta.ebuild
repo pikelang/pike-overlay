@@ -4,13 +4,13 @@
 
 EAPI="2"
 DESCRIPTION="Pike programming language and runtime"
-HOMEPAGE="http://pike.ida.liu.se/"
+HOMEPAGE="http://pike.lysator.liu.se/"
 # Get the alpha/beta designator (if any).
 MY_PR="${PV//[0-9._]/}"
 MY_PR="${MY_PR:-all}"
 # Strip the alpha/beta designator.
 MY_PV="${PV/_*/}"
-SRC_URI="http://pike.ida.liu.se/pub/pike/${MY_PR}/${MY_PV}/Pike-v${MY_PV}.tar.gz"
+SRC_URI="http://pike.lysator.liu.se/pub/pike/${MY_PR}/${MY_PV}/Pike-v${MY_PV}.tar.gz"
 
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0"

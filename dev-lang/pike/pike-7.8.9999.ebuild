@@ -4,9 +4,9 @@
 
 EAPI="2"
 DESCRIPTION="Pike programming language and runtime"
-HOMEPAGE="http://pike.ida.liu.se/"
-#SRC_URI="http://pike.ida.liu.se/pub/pike/all/${PV}/Pike-v${PV}.tar.gz"
-SRC_URI="http://pike.ida.liu.se/generated/pikefarm/packages/7.8/latest -> Pike-v7.8-snapshot.tar.gz"
+HOMEPAGE="http://pike.lysator.liu.se/"
+#SRC_URI="http://pike.lysator.liu.se/pub/pike/all/${PV}/Pike-v${PV}.tar.gz"
+SRC_URI="http://pike.lysator.liu.se/generated/pikefarm/packages/7.8/latest -> Pike-v7.8-snapshot.tar.gz"
 
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0"
