@@ -2,11 +2,15 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-7.8.700 (30 Mar 2013)
+  30 Mar 2013: Henrik Grubbström <grubba@grubba.org> pike-7.8.700.ebuild:
+  Pike 7.8.700 has been out of beta for a while now.
+
 *pike-7.6.128_beta (10 Oct 2012)
 
   10 Oct 2012: Henrik Grubbström <grubba@grubba.org> pike-7.6.128_beta.ebuild:
   Added new maintenance branch beta.
-	
+
   10 Oct 2012: Henrik Grubbström <grubba@grubba.org> Manifest:
   Updated manifest checksums to use SHA256 instead of RMD160.
 
