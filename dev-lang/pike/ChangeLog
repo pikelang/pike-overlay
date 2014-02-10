@@ -2,6 +2,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-7.8.808 (10 Feb 2014)
+  10 Feb 2014: Henrik Grubbström <grubba@grubba.org> pike-7.8.808_alpha.ebuild:
+  Repaired broken build with machine-code on x86.
+
 *pike-7.8.808 (15 Jan 2014)
   15 Jan 2014: Henrik Grubbström <grubba@grubba.org> pike-7.8.808_alpha.ebuild:
   Added the latest alpha.

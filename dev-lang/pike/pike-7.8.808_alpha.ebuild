@@ -47,6 +47,10 @@ RDEPEND=""
 
 S=${WORKDIR}/Pike-v${MY_PV}
 
+src_prepare() {
+	epatch "${FILESDIR}/x86-machine-code-7.8.patch"
+}
+
 src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136
