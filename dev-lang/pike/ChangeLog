@@ -2,8 +2,12 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-7.8.856 (5 May 2014)
+  5 May 2014: Henrik Grubbström <grubba@grubba.org> pike-7.8.856_beta.ebuild:
+  Added the latest beta.
+
 *pike-7.8.852 (31 Mar 2014)
-  31 Mar 2014: Henrik Grubbström <grubba@grubba.org> pike-7.8.851_alpha.ebuild:
+  31 Mar 2014: Henrik Grubbström <grubba@grubba.org> pike-7.8.852_alpha.ebuild:
   Added the latest alpha.
 
 *pike-7.8.834 (26 Feb 2014)
