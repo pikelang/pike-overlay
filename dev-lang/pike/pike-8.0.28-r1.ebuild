@@ -109,11 +109,11 @@ src_install() {
 	sed -i s/rm\(mod\+\"\.o\"\)\;/break\;/ "${S}"/bin/install.pike || die "Failed to modify install.pike (1)"
 	sed -i 's/\(Array.map *( *files_to_delete *- *files_to_not_delete, *rm *);\)/; \/\/ \1/' "${S}"/bin/install.pike || die "Failed to modify install.pike (2)"
 	if use doc ; then
-		make INSTALLARGS="--traditional lib_prefix=/usr/libexec/pike/" buildroot="${D}" install || die
+		make INSTALLARGS="--traditional" buildroot="${D}" install || die
 		einfo "Installing 60MB of docs, this could take some time ..."
 		dohtml -r "${S}"/refdoc/traditional_manual "${S}"/refdoc/modref
 	else
-		make INSTALLARGS="--traditional lib_prefix=/usr/libexec/pike/" buildroot="${D}" install_nodoc || die
+		make INSTALLARGS="--traditional" buildroot="${D}" install_nodoc || die
 	fi
 	# Installation is a bit broken.. remove the doc sources.
 	rm -rf "${D}/usr/doc"
