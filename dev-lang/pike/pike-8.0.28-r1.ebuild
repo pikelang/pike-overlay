@@ -27,7 +27,7 @@ DEPEND="dev-libs/nettle
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
 	gtk? ( =x11-libs/gtk+-1.2* >x11-libs/gtk+-2 )
-	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/gnome-applets gnome-base/libglade ) )
+	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
 	gtk? ( opengl? ( x11-libs/gtkglarea ) )
 	java? ( virtual/jdk virtual/libffi )
 	jpeg? ( virtual/jpeg )
