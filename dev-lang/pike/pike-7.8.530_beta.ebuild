@@ -30,7 +30,7 @@ DEPEND="<dev-libs/nettle-2.1
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
-	mysql? ( virtual/mysql )
+	mysql? ( virtual/libmysqlclient )
 	odbc? ( dev-db/libiodbc )
 	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
 	pcre? ( dev-libs/libpcre )
