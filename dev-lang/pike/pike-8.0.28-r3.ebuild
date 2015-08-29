@@ -50,6 +50,10 @@ RDEPEND=""
 
 S=${WORKDIR}/Pike-v${MY_PV}
 
+src_prepare() {
+	epatch "${FILESDIR}/pike-8.0-freetype-2.6.patch"
+}
+
 src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136

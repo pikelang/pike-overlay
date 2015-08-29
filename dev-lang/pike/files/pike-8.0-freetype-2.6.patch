@@ -1,0 +1,42 @@
+commit d6fdab268453ff78fe00ebc4f75cab6630c54635
+Author: Henrik Grubbström (Grubba) <grubba@grubba.org>
+Date:   Fri Jun 12 11:23:36 2015 +0200
+
+    FreeType: Fix compilation with Freetype 2.6.
+
+diff --git a/src/modules/_Image_FreeType/freetype.c b/src/modules/_Image_FreeType/freetype.c
+index 73db8e7..7fb6ae5 100644
+--- a/src/modules/_Image_FreeType/freetype.c
++++ b/src/modules/_Image_FreeType/freetype.c
+@@ -5,9 +5,6 @@
+ */
+ 
+ #include "config.h"
+-#include "global.h"
+-#include "module.h"
+-#include "pike_error.h"
+ 
+ #ifdef HAVE_LIBFT2
+ #ifndef HAVE_FT_FT2BUILD
+@@ -21,6 +18,13 @@
+ #include FT_TRUETYPE_IDS_H
+ #endif
+ 
++/* Freetype 2.6 defines a conflicting TYPEOF() macro. */
++#undef TYPEOF
++#endif /* HAVE_LIBFT2 */
++
++#include "global.h"
++#include "module.h"
++#include "pike_error.h"
+ #include "pike_macros.h"
+ #include "object.h"
+ #include "constants.h"
+@@ -34,7 +38,6 @@
+ #include "module_support.h"
+ #include "operators.h"
+ #include "../Image/image.h"
+-#endif /* HAVE_LIBFT2 */
+ 
+ 
+ #ifdef HAVE_LIBFT2
