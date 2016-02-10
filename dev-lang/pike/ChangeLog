@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.164 (10 Feb 2016)
+  10 Feb 2016: Henrik Grubbström <grubba@grubba.org> pike-8.0.164.ebuild:
+  Pike 8.0.164 has been released as Pike 8.0 stable.
+
 *pike-8.0.164_beta (09 Feb 2016)
   09 Feb 2016: Henrik Grubbström <grubba@grubba.org> pike-8.0.164_beta.ebuild:
   Pike 8.0.164 (aka Pike 8.0 RC5).
