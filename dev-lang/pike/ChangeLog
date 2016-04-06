@@ -3,6 +3,13 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.222_beta (06 Apr 2016)
+  06 Apr 2016: Henrik Grubbström <grubba@grubba.org> pike-8.0.222_beta.ebuild:
+  Pike 8.0.222 (aka Pike 8.0 Release 3 RC1).
+  Changed slot from 0 to 0/8.0.
+  Added USE flags vcdiff and webp.
+  Sets RDEPEND.
+
 *pike-8.0.182-r1 (20 Mar 2016)
   20 Mar 2016: Henrik Grubbström <grubba@grubba.org> pike-8.0.182-r1.ebuild:
   Added dependency on Oracle when in USE.
