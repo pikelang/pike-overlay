@@ -5,6 +5,10 @@
 
 *pike-8.0.222_beta (06 Apr 2016)
   06 Apr 2016: Henrik Grubbström <grubba@grubba.org> pike-8.0.222_beta.ebuild:
+  Support Oracle 11 in addition to Oracle 12.
+
+*pike-8.0.222_beta (06 Apr 2016)
+  06 Apr 2016: Henrik Grubbström <grubba@grubba.org> pike-8.0.222_beta.ebuild:
   Pike 8.0.222 (aka Pike 8.0 Release 3 RC1).
   Changed slot from 0 to 0/8.0.
   Added USE flags vcdiff and webp.
