@@ -17,7 +17,7 @@ SRC_URI="http://pike.lysator.liu.se/pub/pike/${MY_PR}/${MY_PV}/Pike-v${MY_PV}.ta
 
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0/8.0"
-KEYWORDS="~alpha ~amd64 ~hppa ~ia64 ~mips ~ppc ~sparc ~x86 ~x86-fbsd"
+KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl oracle pcre pdf scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
 
 DEPEND="dev-libs/nettle
