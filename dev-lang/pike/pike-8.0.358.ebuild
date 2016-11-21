@@ -17,7 +17,7 @@ SRC_URI="http://pike.lysator.liu.se/pub/pike/${MY_PR}/${MY_PV}/Pike-v${MY_PV}.ta
 
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0/8.0"
-if test "x${MY_PV}" = "xall"; then
+if [[ "x${MY_PR}" == "xall" ]]; then
 	# Not an alpha or beta release.
 	KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 else
