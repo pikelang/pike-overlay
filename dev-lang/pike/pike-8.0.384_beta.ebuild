@@ -16,8 +16,9 @@ MY_PR="${MY_PR:-all}"
 MY_PV="${PV/_*/}"
 SRC_URI="http://pike.lysator.liu.se/pub/pike/${MY_PR}/${MY_PV}/Pike-v${MY_PV}.tar.gz"
 
+MY_RELEASE="${MY_PV%.*}"
 MY_MAJOR="${MY_PV//.[0-9.]*/}"
-MY_RELEASE="${MY_PV%.[0-9]*}"
+MY_MINOR="${MY_RELEASE/[0-9]./}"
 
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0/${MY_RELEASE}"
