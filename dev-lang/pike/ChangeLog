@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.388-r1 (02 Feb 2017)
+  02 Feb 2017: Henrik Grubbström <grubba@grubba.org> pike-8.0.388-r1.ebuild:
+  GTK 1.2 is being deprecated.
+
 *pike-8.0.388 (02 Jan 2017)
   02 Jan 2017: Henrik Grubbström <grubba@grubba.org> pike-8.0.388.ebuild:
   Pike 8.0.388 has been released as Pike 8.0 stable release 7.
