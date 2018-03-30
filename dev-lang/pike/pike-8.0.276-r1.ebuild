@@ -1,4 +1,3 @@
-# -*- sh -*-
 # Copyright 1999-2008 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 # $Header$
@@ -16,28 +15,9 @@ MY_PR="${MY_PR:-all}"
 MY_PV="${PV/_*/}"
 SRC_URI="http://pike.lysator.liu.se/pub/pike/${MY_PR}/${MY_PV}/Pike-v${MY_PV}.tar.gz"
 
-MY_RELEASE="${MY_PV%.*}"
-MY_MAJOR="${MY_PV//.[0-9.]*/}"
-MY_MINOR="${MY_RELEASE/[0-9]./}"
-
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
-SLOT="0/${MY_RELEASE}"
-
-MY_STABLE="no"
-case ${MY_MINOR} in
-	*0|*2|*4|*6|*8)
-		# Even minor means stable release.
-		MY_STABLE="yes"
-	;;
-esac
-
-KEYWORDS="~alpha ~amd64 ~hppa ~ia64 ~mips ~ppc ~sparc ~x86 ~x86-fbsd"
-
-if [[ ${MY_PR} == all && ${MY_STABLE} == yes ]]; then
-	# Stable branch and not an alpha or beta release.
-	KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
-fi
-
+SLOT="0/8.0"
+KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl oracle pcre pdf scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
 
 DEPEND="dev-libs/nettle
@@ -100,6 +80,12 @@ RDEPEND="dev-libs/nettle
 	zlib? ( sys-libs/zlib )"
 
 S=${WORKDIR}/Pike-v${MY_PV}
+
+src_prepare() {
+	# Ncurses version 6 added a new (incompatible)
+	# format for terminfo files.
+	epatch "${FILESDIR}/terminfo-v6.patch"
+}
 
 src_compile() {
 	local myconf=""

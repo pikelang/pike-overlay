@@ -12,7 +12,7 @@ SLOT="0"
 KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl pcre pdf scanner sdl sqlite svg tiff truetype zlib"
 
-DEPEND="<dev-libs/nettle-2
+DEPEND="dev-libs/nettle
 	dev-libs/gmp
 	media-libs/giflib
 	bzip2? ( app-arch/bzip2 )
@@ -42,6 +42,12 @@ RDEPEND=""
 
 S=${WORKDIR}/Pike-v${PV}
 
+src_prepare() {
+	# Ncurses version 6 added a new (incompatible)
+	# format for terminfo files.
+	epatch "${FILESDIR}/terminfo-v6.patch"
+}
+
 src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136
@@ -57,7 +63,6 @@ src_compile() {
 			--disable-noopty-retry \
 			--without-cdebug \
 			--without-bundles \
-			--without-copt \
 			--without-ssleay \
 			--with-crypt \
 			--with-gif \

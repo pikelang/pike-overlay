@@ -47,6 +47,12 @@ RDEPEND=""
 
 S=${WORKDIR}/Pike-v${MY_PV}
 
+src_prepare() {
+	# Ncurses version 6 added a new (incompatible)
+	# format for terminfo files.
+	epatch "${FILESDIR}/terminfo-v6.patch"
+}
+
 src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136
