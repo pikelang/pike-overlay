@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.528-r1 (30 Mar 2018)
+  30 Mar 2018: Henrik Grubbström <grubba@grubba.org> pike-8.0.528-r1.ebuild:
+  Patch in support for ncurses6.
+
 *pike-8.0.528 (03 Jan 2018)
   03 Jan 2018: Henrik Grubbström <grubba@grubba.org> pike-8.0.528.ebuild:
   Pike 8.0.528 (aka Pike 8.0 Release 12 RC1).
