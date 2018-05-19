@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.622 (19 May 2018)
+  19 May 2018: Henrik Grubbström <grubba@grubba.org> pike-8.0.622.ebuild:
+  Pike 8.0.622 (aka Pike 8.0 Release 13 RC1).
+
 *pike-8.0.610 (19 May 2018)
   19 May 2018: Henrik Grubbström <grubba@grubba.org> pike-8.0.610.ebuild:
   Pike 8.0.610 has been released as Pike 8.0 stable release 12.
