@@ -3,6 +3,11 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.690 (13 Sep 2018)
+  13 Sep 2018: Henrik Grubbström <grubba@grubba.org> pike-8.0.690.ebuild:
+  Pike 8.0.690 (aka Pike 8.0 Release 13 RC2).
+  The odbc USE flag now pulls in either dev-db/unixODBC or dev-db/libiodbc.
+
 *pike-8.0.622 (19 May 2018)
   19 May 2018: Henrik Grubbström <grubba@grubba.org> pike-8.0.622.ebuild:
   Pike 8.0.622 (aka Pike 8.0 Release 13 RC1).
