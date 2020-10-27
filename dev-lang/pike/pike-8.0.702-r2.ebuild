@@ -38,7 +38,7 @@ if [[ ${MY_PR} == all && ${MY_STABLE} == yes ]]; then
 	KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 fi
 
-IUSE="bzip2 debug doc fftw gdbm glut gnome gtk gtk1 hardened java jpeg kerberos msql mysql odbc opengl oracle pcre pdf sass scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
+IUSE="bzip2 debug doc fftw gdbm glut gnome gtk gtk1 hardened java jpeg kerberos msql mysql odbc opengl oracle pcre sass scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
 
 DEPEND="dev-libs/nettle
 	dev-libs/gmp
@@ -46,10 +46,8 @@ DEPEND="dev-libs/nettle
 	bzip2? ( app-arch/bzip2 )
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
-	gtk1? ( =x11-libs/gtk+-1.2* )
 	gtk? ( x11-libs/gtk+:2 x11-libs/gtksourceview:2.0 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
-	gtk? ( opengl? ( x11-libs/gtkglarea ) )
 	java? ( virtual/jdk virtual/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
@@ -59,7 +57,6 @@ DEPEND="dev-libs/nettle
 	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
 	oracle? ( || ( dev-db/oracle-instantclient[sdk] dev-db/oracle-instantclient-basic ) )
 	pcre? ( dev-libs/libpcre )
-	pdf? ( media-libs/pdflib )
 	sass? ( dev-libs/libsass )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
 	sdl? ( media-libs/libsdl media-libs/sdl-mixer )
@@ -78,10 +75,8 @@ RDEPEND="dev-libs/nettle
 	bzip2? ( app-arch/bzip2 )
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
-	gtk1? ( =x11-libs/gtk+-1.2* )
 	gtk? ( >x11-libs/gtk+-2 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
-	gtk? ( opengl? ( x11-libs/gtkglarea ) )
 	java? ( virtual/jdk virtual/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
@@ -91,7 +86,6 @@ RDEPEND="dev-libs/nettle
 	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
 	oracle? ( || ( dev-db/oracle-instantclient dev-db/oracle-instantclient-basic ) )
 	pcre? ( dev-libs/libpcre )
-	pdf? ( media-libs/pdflib )
 	sass? ( dev-libs/libsass )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
 	sdl? ( media-libs/libsdl media-libs/sdl-mixer )

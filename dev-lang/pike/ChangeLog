@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.702-r2 (27 Oct 2020)
+  27 Oct 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.702-r2.ebuild:
+  Removed references to some obsolete and/or removed ebuilds.
+
 *pike-8.0.702-r1 (1 Mar 2020)
   1 Mar 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.702-r1.ebuild:
   Support for MariaDB 10.x was fixed in Pike 8.0.512.
