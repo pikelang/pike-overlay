@@ -141,7 +141,6 @@ src_compile() {
 			$(use opengl && use_with glut GLUT) \
 			$(use opengl || use_with opengl GLUT) \
 			$(use_with pcre _Regexp_PCRE) \
-			$(use_with pdf libpdf) \
 			$(use_with sass) \
 			$(use_with scanner sane) \
 			$(use_with sdl SDL) \
