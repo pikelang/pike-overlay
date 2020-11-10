@@ -3,7 +3,11 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
-*pike-8.0.702-r3 (27 Oct 2020)
+*pike-8.0.1088_alpha (10 Nov 2020)
+  10 Nov 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.1088_alpha.ebuild:
+  Added the latest alpha.
+
+*pike-8.0.702-r3 (09 Nov 2020)
   09 Nov 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.702-r3.ebuild:
   Removed reference to libpdf.
 
