@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.1110_beta (16 Dec 2020)
+  16 Dec 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.1110_beta.ebuild:
+  Added the latest beta.
+
 *pike-8.0.1088_alpha (10 Nov 2020)
   10 Nov 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.1088_alpha.ebuild:
   Added the latest alpha.
