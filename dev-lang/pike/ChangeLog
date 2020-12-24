@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.1116 (24 Dec 2020)
+  24 Dec 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.1116.ebuild:
+  Pike 8.0.1116 has been released as Pike 8.0 stable release 14.
+
 *pike-8.0.1110_beta (16 Dec 2020)
   16 Dec 2020: Henrik Grubbström <grubba@grubba.org> pike-8.0.1110_beta.ebuild:
   Added the latest beta.
