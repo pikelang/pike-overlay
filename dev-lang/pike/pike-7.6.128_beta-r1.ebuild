@@ -2,7 +2,10 @@
 # Distributed under the terms of the GNU General Public License v2
 # $Header$
 
-EAPI="2"
+EAPI="6"
+
+inherit epatch multilib
+
 DESCRIPTION="Pike programming language and runtime"
 HOMEPAGE="http://pike.lysator.liu.se/"
 # Get the alpha/beta designator (if any).
