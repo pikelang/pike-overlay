@@ -15,7 +15,7 @@ SLOT="0"
 KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl pcre pdf scanner sdl sqlite svg tiff truetype zlib"
 
-DEPEND="<dev-libs/nettle-2
+DEPEND="dev-libs/nettle
 	dev-libs/gmp
 	media-libs/giflib
 	bzip2? ( app-arch/bzip2 )
@@ -24,7 +24,7 @@ DEPEND="<dev-libs/nettle-2
 	gtk? ( =x11-libs/gtk+-1.2* >x11-libs/gtk+-2 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/gnome-applets gnome-base/libglade ) )
 	gtk? ( opengl? ( x11-libs/gtkglarea ) )
-	java? ( virtual/jdk virtual/libffi )
+	java? ( virtual/jdk dev-libs/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
@@ -66,7 +66,6 @@ src_compile() {
 			--disable-noopty-retry \
 			--without-cdebug \
 			--without-bundles \
-			--without-copt \
 			--without-ssleay \
 			--with-crypt \
 			--with-gif \

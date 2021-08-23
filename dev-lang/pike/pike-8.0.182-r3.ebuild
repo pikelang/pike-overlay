@@ -18,7 +18,7 @@ SRC_URI="http://pike.lysator.liu.se/pub/pike/${MY_PR}/${MY_PV}/Pike-v${MY_PV}.ta
 LICENSE="GPL-2 LGPL-2.1 MPL-1.1"
 SLOT="0"
 KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
-IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl pcre pdf scanner sdl sqlite svg tiff truetype zlib"
+IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl oracle pcre pdf scanner sdl sqlite svg tiff truetype zlib"
 
 DEPEND="dev-libs/nettle
 	dev-libs/gmp
@@ -29,13 +29,14 @@ DEPEND="dev-libs/nettle
 	gtk? ( =x11-libs/gtk+-1.2* >x11-libs/gtk+-2 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
 	gtk? ( opengl? ( x11-libs/gtkglarea ) )
-	java? ( virtual/jdk virtual/libffi )
+	java? ( virtual/jdk dev-libs/libffix )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
 	mysql? ( virtual/libmysqlclient )
 	odbc? ( dev-db/libiodbc )
 	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
+	oracle? ( dev-db/oracle-instantclient[sdk] )
 	pcre? ( dev-libs/libpcre )
 	pdf? ( media-libs/pdflib )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
@@ -88,6 +89,7 @@ src_compile() {
 			$(use_with mysql) \
 			$(use_with odbc Odbc) \
 			$(use_with opengl GL) \
+			$(use_with oracle) \
 			$(use opengl && use_with glut GLUT) \
 			$(use opengl || use_with opengl GLUT) \
 			$(use_with pcre _Regexp_PCRE) \

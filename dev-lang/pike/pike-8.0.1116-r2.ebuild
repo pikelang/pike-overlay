@@ -38,7 +38,7 @@ if [[ ${MY_PR} == all && ${MY_STABLE} == yes ]]; then
 	KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 fi
 
-IUSE="bzip2 debug doc fftw gdbm glut gnome gtk gtk1 hardened java jpeg kerberos msql mysql odbc opengl oracle pcre pdf scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
+IUSE="bzip2 debug doc fftw gdbm glut gnome gtk gtk1 hardened java jpeg kerberos msql mysql odbc opengl oracle pcre sass scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
 
 DEPEND="dev-libs/nettle
 	dev-libs/gmp
@@ -46,20 +46,18 @@ DEPEND="dev-libs/nettle
 	bzip2? ( app-arch/bzip2 )
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
-	gtk1? ( =x11-libs/gtk+-1.2* )
-	gtk? ( >x11-libs/gtk+-2 )
+	gtk? ( x11-libs/gtk+:2 x11-libs/gtksourceview:2.0 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
-	gtk? ( opengl? ( x11-libs/gtkglarea ) )
-	java? ( virtual/jdk virtual/libffi )
+	java? ( virtual/jdk dev-libs/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
-	mysql? ( || ( virtual/libmysqlclient <dev-db/mysql-5.6 <dev-db/mariadb-10 ) )
-	odbc? ( dev-db/libiodbc )
+	mysql? ( || ( virtual/libmysqlclient <dev-db/mysql-5.6 dev-db/mariadb ) )
+	odbc? ( || ( dev-db/unixODBC dev-db/libiodbc ) )
 	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
 	oracle? ( || ( dev-db/oracle-instantclient[sdk] dev-db/oracle-instantclient-basic ) )
 	pcre? ( dev-libs/libpcre )
-	pdf? ( media-libs/pdflib )
+	sass? ( dev-libs/libsass )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
 	sdl? ( media-libs/libsdl media-libs/sdl-mixer )
 	sqlite? ( dev-db/sqlite )
@@ -77,20 +75,18 @@ RDEPEND="dev-libs/nettle
 	bzip2? ( app-arch/bzip2 )
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
-	gtk1? ( =x11-libs/gtk+-1.2* )
 	gtk? ( >x11-libs/gtk+-2 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
-	gtk? ( opengl? ( x11-libs/gtkglarea ) )
-	java? ( virtual/jdk virtual/libffi )
+	java? ( virtual/jdk dev-libs/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
-	mysql? ( || ( virtual/libmysqlclient <dev-db/mysql-5.6 <dev-db/mariadb-10 ) )
-	odbc? ( dev-db/libiodbc )
+	mysql? ( || ( virtual/libmysqlclient <dev-db/mysql-5.6 dev-db/mariadb ) )
+	odbc? ( || ( dev-db/unixODBC dev-db/libiodbc ) )
 	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
 	oracle? ( || ( dev-db/oracle-instantclient dev-db/oracle-instantclient-basic ) )
 	pcre? ( dev-libs/libpcre )
-	pdf? ( media-libs/pdflib )
+	sass? ( dev-libs/libsass )
 	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
 	sdl? ( media-libs/libsdl media-libs/sdl-mixer )
 	sqlite? ( dev-db/sqlite )
@@ -104,9 +100,7 @@ RDEPEND="dev-libs/nettle
 S=${WORKDIR}/Pike-v${MY_PV}
 
 src_prepare() {
-	# Ncurses version 6 added a new (incompatible)
-	# format for terminfo files.
-	epatch "${FILESDIR}/terminfo-v6.patch"
+	:
 }
 
 src_compile() {
@@ -147,7 +141,7 @@ src_compile() {
 			$(use opengl && use_with glut GLUT) \
 			$(use opengl || use_with opengl GLUT) \
 			$(use_with pcre _Regexp_PCRE) \
-			$(use_with pdf libpdf) \
+			$(use_with sass) \
 			$(use_with scanner sane) \
 			$(use_with sdl SDL) \
 			$(use_with sdl SDL_mixer) \

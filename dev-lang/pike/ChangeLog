@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.1116-r2 (23 Aug 2021)
+  23 Aug 2021: Henrik Grubbström <grubba@grubba.org> pike-8.0.1116-r1.ebuild:
+  Depend on dev-libs/libffi instead of (the removed) virtual/libffi.
+
 *pike-8.0.1116-r1 (30 Jun 2021)
   30 Jun 2021: Henrik Grubbström <grubba@grubba.org> pike-8.0.1116-r1.ebuild:
   Bump EAPI for all ebuilds to 6.

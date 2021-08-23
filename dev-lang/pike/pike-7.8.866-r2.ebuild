@@ -29,7 +29,7 @@ DEPEND="dev-libs/nettle
 	gtk? ( =x11-libs/gtk+-1.2* >x11-libs/gtk+-2 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/gnome-applets gnome-base/libglade ) )
 	gtk? ( opengl? ( x11-libs/gtkglarea ) )
-	java? ( virtual/jdk virtual/libffi )
+	java? ( virtual/jdk dev-libs/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )

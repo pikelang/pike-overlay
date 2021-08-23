@@ -38,7 +38,7 @@ if [[ ${MY_PR} == all && ${MY_STABLE} == yes ]]; then
 	KEYWORDS="alpha amd64 hppa ia64 mips ppc sparc x86 x86-fbsd"
 fi
 
-IUSE="bzip2 debug doc fftw gdbm glut gnome gtk gtk1 hardened java jpeg kerberos msql mysql odbc opengl oracle pcre pdf scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
+IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl oracle pcre pdf scanner sdl sqlite svg test tiff truetype vcdiff webp zlib"
 
 DEPEND="dev-libs/nettle
 	dev-libs/gmp
@@ -46,11 +46,10 @@ DEPEND="dev-libs/nettle
 	bzip2? ( app-arch/bzip2 )
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
-	gtk1? ( =x11-libs/gtk+-1.2* )
-	gtk? ( x11-libs/gtk+:2 x11-libs/gtksourceview:2.0 )
+	gtk? ( =x11-libs/gtk+-1.2* >x11-libs/gtk+-2 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
 	gtk? ( opengl? ( x11-libs/gtkglarea ) )
-	java? ( virtual/jdk virtual/libffi )
+	java? ( virtual/jdk dev-libs/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
@@ -77,11 +76,10 @@ RDEPEND="dev-libs/nettle
 	bzip2? ( app-arch/bzip2 )
 	fftw? ( sci-libs/fftw )
 	gdbm? ( sys-libs/gdbm )
-	gtk1? ( =x11-libs/gtk+-1.2* )
-	gtk? ( >x11-libs/gtk+-2 )
+	gtk? ( =x11-libs/gtk+-1.2* >x11-libs/gtk+-2 )
 	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
 	gtk? ( opengl? ( x11-libs/gtkglarea ) )
-	java? ( virtual/jdk virtual/libffi )
+	java? ( virtual/jdk dev-libs/libffi )
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
@@ -133,8 +131,6 @@ src_compile() {
 			$(use_with debug rtldebug) \
 			$(use_with fftw) \
 			$(use_with gdbm) \
-			$(use_with gtk1 GTK1) \
-			$(use_with gtk GTK2) \
 			$(use_with java Java) \
 			$(use_with jpeg jpeglib) \
 			$(use_with kerberos Kerberos) \
