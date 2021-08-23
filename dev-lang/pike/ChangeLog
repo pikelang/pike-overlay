@@ -5,6 +5,10 @@
 
 *pike-8.0.1116-r2 (23 Aug 2021)
   23 Aug 2021: Henrik Grubbström <grubba@grubba.org> pike-8.0.1116-r1.ebuild:
+  Empty src_prepare() not allowed with EAPI 6.
+
+*pike-8.0.1116-r2 (23 Aug 2021)
+  23 Aug 2021: Henrik Grubbström <grubba@grubba.org> pike-8.0.1116-r1.ebuild:
   Depend on dev-libs/libffi instead of (the removed) virtual/libffi.
 
 *pike-8.0.1116-r1 (30 Jun 2021)

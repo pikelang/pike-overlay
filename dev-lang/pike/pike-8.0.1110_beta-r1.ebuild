@@ -99,10 +99,6 @@ RDEPEND="dev-libs/nettle
 
 S=${WORKDIR}/Pike-v${MY_PV}
 
-src_prepare() {
-	:
-}
-
 src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136
