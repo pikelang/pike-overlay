@@ -45,11 +45,12 @@ RDEPEND=""
 
 S=${WORKDIR}/Pike-v${PV}
 
-src_prepare() {
-	# Ncurses version 6 added a new (incompatible)
-	# format for terminfo files.
-	epatch "${FILESDIR}/terminfo-v6.patch"
-}
+# terminfo-v6.patch:
+#   Ncurses version 6 added a new (incompatible)
+#   format for terminfo files.
+PATCHES=(
+	"${FILESDIR}/terminfo-v6.patch"
+	)
 
 src_compile() {
 	local myconf=""
