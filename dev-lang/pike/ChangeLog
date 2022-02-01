@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.1738_beta (01 Feb 2022)
+  01 Feb 2022: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738_beta.ebuild:
+  Added the latest beta.
+
 *pike-8.0.1116-r2 (23 Aug 2021)
   23 Aug 2021: Henrik Grubbström <grubba@grubba.org> pike-8.0.1116-r1.ebuild:
   Empty src_prepare() not allowed with EAPI 6.
