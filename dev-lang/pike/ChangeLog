@@ -4,6 +4,10 @@
 # $Header$
 
 *pike-8.0.1738_beta (01 Feb 2022)
+  02 Mar 2022: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738.ebuild:
+  Pike 8.0.1738 has been released as Pike 8.0 stable release 15.
+
+*pike-8.0.1738_beta (01 Feb 2022)
   01 Feb 2022: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738_beta.ebuild:
   Added the latest beta.
 
