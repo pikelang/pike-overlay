@@ -99,6 +99,18 @@ RDEPEND="dev-libs/nettle
 
 S=${WORKDIR}/Pike-v${MY_PV}
 
+# pike-8.0-gz-1.2.12.patch:
+#   zlib 1.2.12 includes commit 0d36ec47f310478549c0864f215ab5c0114c49ba,
+#        Don't bother computing check value after successful inflateSync().
+#
+#   Because of that, it does no longer give a Z_DATA_ERROR which we used to
+#   expect, but instead a Z_STREAM_END. Adjusted the configure check to
+#   accept Z_STREAM_END for zlib >= 1.2.12.
+
+PATCHES=(
+    "${FILESDIR}/pike-8.0-gz-1.2.12.patch"
+    )
+
 src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136
