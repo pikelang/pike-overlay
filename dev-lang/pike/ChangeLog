@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.1738-r2 (27 Jun 2023)
+  27 Jun 2023: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738-r2.ebuild:
+  Add dependency on virtual/libcrypt.
+
 *pike-8.0.1738-r1 (14 Nov 2022)
   14 Nov 2022: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738-r1.ebuild:
   Add patch to accept zlib 1.2.12.

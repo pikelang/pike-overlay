@@ -40,7 +40,8 @@ fi
 
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk gtk1 hardened java jpeg kerberos msql mysql odbc opengl oracle pcre sass scanner sdl sqlite svg test tiff truetype vcdiff webp x86-fbsd zlib"
 
-DEPEND="dev-libs/nettle
+DEPEND="virtual/libcrypt:=
+	dev-libs/nettle
 	dev-libs/gmp
 	media-libs/giflib
 	bzip2? ( app-arch/bzip2 )
@@ -69,7 +70,8 @@ DEPEND="dev-libs/nettle
 	webp? ( media-libs/libwebp )
 	zlib? ( sys-libs/zlib )"
 
-RDEPEND="dev-libs/nettle
+RDEPEND="virtual/libcrypt:=
+	dev-libs/nettle
 	dev-libs/gmp
 	media-libs/giflib
 	bzip2? ( app-arch/bzip2 )

@@ -16,7 +16,8 @@ SLOT="0"
 KEYWORDS="~alpha ~amd64 ~hppa ~ia64 ~mips ~ppc ~sparc ~x86 ~x86-fbsd"
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk hardened java jpeg kerberos msql mysql odbc opengl pcre pdf scanner sdl sqlite svg tiff truetype zlib"
 
-DEPEND="dev-libs/nettle
+DEPEND="virtual/libcrypt:=
+	dev-libs/nettle
 	dev-libs/gmp
 	media-libs/giflib
 	bzip2? ( app-arch/bzip2 )
