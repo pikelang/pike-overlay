@@ -113,6 +113,29 @@ PATCHES=(
     "${FILESDIR}/pike-8.0-gz-1.2.12.patch"
     )
 
+# Ignore QA warnings about missing prototypes for functions
+# that we know are not present on Linux and/or FreeBSD, or
+# are compiler-specific.
+QA_CONFIG_IMPL_DECL_SKIP=(
+    _byteswap_ulong		# ICC
+    _byteswap_uint64		# ICC
+
+    __cntlz4			# IBM C
+    __cntlz8			# IBM C
+    __cnttz4			# IBM C
+    __cnttz8			# IBM C
+
+    pthread_yield_np		# PTHREAD
+
+    fpsetmask			# FreeBSD/NetBSD
+    fpsetround			# FreeBSD/NetBSD
+
+    setpgrp			# Sys V, obsolete on Linux. Prototype hidden.
+
+    GetSystemTimeAsFileTime	# WIN32
+    FindFirstChangeNotification	# WIN32
+    )
+
 src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136
