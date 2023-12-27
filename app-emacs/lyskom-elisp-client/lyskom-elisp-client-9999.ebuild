@@ -6,7 +6,7 @@ EAPI=7
 # Distributed under the terms of the GNU General Public License v2
 # $Header: /var/cvsroot/gentoo-x86/app-emacs/lyskom-elisp-client/lyskom-elisp-client-0.48.ebuild,v 1.6 2007/07/03 09:45:44 opfer Exp $
 
-inherit elisp cvs
+inherit elisp git-r3
 
 S="${WORKDIR}/${PN}"
 
@@ -16,16 +16,10 @@ HOMEPAGE="http://www.lysator.liu.se/lyskom/klienter/emacslisp/index.en.html"
 
 LICENSE="GPL-2"
 SLOT="0"
-KEYWORDS="amd64 sparc x86"
+KEYWORDS="~amd64 ~arm64 ~sparc ~x86"
 IUSE=""
 
-ECVS_SERVER="cvs.lysator.liu.se:/cvsroot/${PN}"
-ECVS_MODULE="lyskom-elisp-client"
-ECVS_AUTH="pserver"
-ECVS_USER="anonymous"
-ECVS_PASS=""
-ECVS_TOPDIR="${DISTDIR}/cvs-src/${ECVS_MODULE}"
-
+EGIT_REPO_URI="https://git.lysator.liu.se/lyskom-elisp-client/lyskom-elisp-client"
 
 SITEFILE=50lyskom-elisp-client-gentoo.el
 DOCS="doc/NEWS-* src/README"
