@@ -8,8 +8,6 @@ EAPI=7
 
 inherit elisp git-r3
 
-S="${WORKDIR}/${PN}"
-
 DESCRIPTION="Elisp client for the LysKOM conference system"
 HOMEPAGE="http://www.lysator.liu.se/lyskom/klienter/emacslisp/index.en.html"
 #SRC_URI="http://www.lysator.liu.se/lyskom/klienter/emacslisp/${MY_P}.tar.gz"
