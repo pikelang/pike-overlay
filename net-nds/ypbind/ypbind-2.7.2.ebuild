@@ -42,6 +42,7 @@ DOC_CONTENTS="
 
 src_prepare() {
 	! use systemd && export ac_cv_header_systemd_sd_daemon_h=no
+        eapply_user
 }
 
 src_configure() {
