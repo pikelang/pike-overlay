@@ -47,10 +47,7 @@ src_prepare() {
 
 src_configure() {
 	econf \
-		$(use_enable nls) \
-		$(use_enable slp) \
-		$(use_with debug dmalloc) \
-		$(use_enable dbus dbus-nm)
+		$(use_enable nls)
 }
 
 src_install() {
