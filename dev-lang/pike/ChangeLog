@@ -3,6 +3,10 @@
 # Copyright 1999-2008 Gentoo Foundation; Distributed under the GPL v2
 # $Header$
 
+*pike-8.0.1738-r4 (29 Dec 2023)
+  29 Dec 2023: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738-r4.ebuild:
+  Update dependencies as virtual/libmysqlclient is no more.
+
 *pike-8.0.1738-r3 (28 Jun 2023)
   28 Jun 2023: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738-r3.ebuild:
   Reduce QA warnings.

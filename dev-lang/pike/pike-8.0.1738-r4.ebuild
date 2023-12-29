@@ -53,7 +53,7 @@ DEPEND="virtual/libcrypt:=
 	jpeg? ( virtual/jpeg )
 	kerberos? ( virtual/krb5 net-libs/libgssglue )
 	msql? ( dev-db/msql )
-	mysql? ( || ( virtual/libmysqlclient <dev-db/mysql-5.6 dev-db/mariadb ) )
+	mysql? ( || ( dev-db/mariadb-connector-c dev-db/mysql-connector-c ) )
 	odbc? ( || ( dev-db/unixODBC dev-db/libiodbc ) )
 	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
 	oracle? ( || ( dev-db/oracle-instantclient[sdk] dev-db/oracle-instantclient-basic ) )
