@@ -40,7 +40,8 @@ fi
 
 IUSE="bzip2 debug doc fftw gdbm glut gnome gtk gtk1 hardened java jpeg kerberos msql mysql odbc opengl oracle pcre sass scanner sdl sqlite svg test tiff truetype vcdiff webp x86-fbsd zlib"
 
-DEPEND="virtual/libcrypt:=
+# Run-time dependencies.
+RDEPEND="virtual/libcrypt:=
 	dev-libs/nettle
 	dev-libs/gmp
 	media-libs/giflib
@@ -70,34 +71,8 @@ DEPEND="virtual/libcrypt:=
 	webp? ( media-libs/libwebp )
 	zlib? ( sys-libs/zlib )"
 
-RDEPEND="virtual/libcrypt:=
-	dev-libs/nettle
-	dev-libs/gmp
-	media-libs/giflib
-	bzip2? ( app-arch/bzip2 )
-	fftw? ( sci-libs/fftw )
-	gdbm? ( sys-libs/gdbm )
-	gtk? ( >x11-libs/gtk+-2 )
-	gtk? ( gnome? ( gnome-base/libgnome gnome-base/libgnomeui gnome-base/libglade ) )
-	java? ( virtual/jdk dev-libs/libffi )
-	jpeg? ( virtual/jpeg )
-	kerberos? ( virtual/krb5 net-libs/libgssglue )
-	msql? ( dev-db/msql )
-	mysql? ( || ( virtual/libmysqlclient <dev-db/mysql-5.6 dev-db/mariadb ) )
-	odbc? ( || ( dev-db/unixODBC dev-db/libiodbc ) )
-	opengl? ( virtual/opengl glut? ( media-libs/freeglut ) )
-	oracle? ( || ( dev-db/oracle-instantclient dev-db/oracle-instantclient-basic ) )
-	pcre? ( dev-libs/libpcre )
-	sass? ( dev-libs/libsass )
-	!x86-fbsd? ( scanner? ( media-gfx/sane-backends ) )
-	sdl? ( media-libs/libsdl media-libs/sdl-mixer )
-	sqlite? ( dev-db/sqlite )
-	svg? ( gnome-base/librsvg )
-	tiff? ( media-libs/tiff )
-	truetype? ( >media-libs/freetype-2 )
-	vcdiff? ( dev-util/open-vcdiff )
-	webp? ( media-libs/libwebp )
-	zlib? ( sys-libs/zlib )"
+# Build-time dependencies.
+DEPEND="${RDEPEND}"
 
 S=${WORKDIR}/Pike-v${MY_PV}
 
