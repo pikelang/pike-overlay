@@ -1,10 +1,11 @@
+# -*- sh -*-
 # Copyright 1999-2008 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 # $Header$
 
-EAPI="6"
+EAPI="8"
 
-inherit eutils multilib
+inherit multilib
 
 DESCRIPTION="Pike programming language and runtime"
 HOMEPAGE="http://pike.lysator.liu.se/"
@@ -154,7 +155,7 @@ src_install() {
 	if use doc ; then
 		make INSTALLARGS="--traditional" buildroot="${D}" install || die
 		einfo "Installing 60MB of docs, this could take some time ..."
-		dohtml -r "${S}"/refdoc/traditional_manual "${S}"/refdoc/modref
+		dodoc -r "${S}"/refdoc/traditional_manual "${S}"/refdoc/modref
 	else
 		make INSTALLARGS="--traditional" buildroot="${D}" install_nodoc || die
 	fi
