@@ -1,6 +1,10 @@
 # -*- coding: utf-8; -*-
 # ChangeLog for dev-lang/pike
 
+*pike-9.0.5_alpha (20 Jun 2024)
+  20 Jun 2024: Henrik Grubbström <grubba@grubba.org> pike-9.0.5_alpha.ebuild:
+  First alpha of Pike 9.0.
+
 *pike-8.0.1738-r5 (10 Jun 2024)
   10 Jun 2024: Henrik Grubbström <grubba@grubba.org> pike-8.0.1738-r5.ebuild:
   Update all ebuilds from EAPI 6 to EAPI 8.
