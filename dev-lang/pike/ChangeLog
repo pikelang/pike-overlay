@@ -1,6 +1,10 @@
 # -*- coding: utf-8; -*-
 # ChangeLog for dev-lang/pike
 
+*pike-9.0.7_beta (1 Jul 2024)
+  01 Jul 2024: Henrik Grubbström <grubba@grubba.org> pike-9.0.7_beta.ebuild:
+  First beta of Pike 9.0.
+
 *pike-9.0.5_alpha (20 Jun 2024)
   20 Jun 2024: Henrik Grubbström <grubba@grubba.org> pike-9.0.5_alpha.ebuild:
   First alpha of Pike 9.0.
