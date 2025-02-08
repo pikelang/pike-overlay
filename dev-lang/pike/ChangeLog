@@ -1,6 +1,10 @@
 # -*- coding: utf-8; -*-
 # ChangeLog for dev-lang/pike
 
+*pike-8.0.1956 (08 Feb 2025)
+  08 Feb 2025: Henrik Grubbström <grubba@grubba.org> pike-8.0.1956.ebuild:
+  Pike 8.0.1956 has been released as Pike 8.0 stable release 16.
+
 *pike-9.0.9_beta (20 Sep 2024)
   20 Sep 2024: Henrik Grubbström <grubba@grubba.org> pike-9.0.9_beta.ebuild:
   Second beta of Pike 9.0.
