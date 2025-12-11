@@ -1,6 +1,10 @@
 # -*- coding: utf-8; -*-
 # ChangeLog for dev-lang/pike
 
+*pike-9.0.11_beta (11 Dec 2025)
+  11 Dec 2025: Henrik Grubbström <grubba@grubba.org> pike-9.0.11_beta.ebuild:
+  Third beta of Pike 9.0.
+
 *pike-9.0.9_beta-r1 (11 Dec 2025)
   11 Dec 2025: Henrik Grubbström <grubba@grubba.org> pike-9.0.9_beta-r1.ebuild:
   Use paxctl and enable machine-code on hardened.
