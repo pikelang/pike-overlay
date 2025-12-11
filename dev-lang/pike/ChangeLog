@@ -1,6 +1,10 @@
 # -*- coding: utf-8; -*-
 # ChangeLog for dev-lang/pike
 
+*pike-9.0.9_beta-r1 (11 Dec 2025)
+  11 Dec 2025: Henrik Grubbström <grubba@grubba.org> pike-9.0.9_beta-r1.ebuild:
+  Use paxctl and enable machine-code on hardened.
+
 *pike-8.0.1956 (08 Feb 2025)
   08 Feb 2025: Henrik Grubbström <grubba@grubba.org> pike-8.0.1956.ebuild:
   Pike 8.0.1956 has been released as Pike 8.0 stable release 16.

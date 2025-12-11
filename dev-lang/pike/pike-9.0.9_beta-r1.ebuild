@@ -74,6 +74,9 @@ RDEPEND="virtual/libcrypt:=
 # Build-time dependencies.
 DEPEND="${RDEPEND}"
 
+# Build-time binary dependencies.
+BDEPEND="hardened? ( sys-apps/paxctl )"
+
 S=${WORKDIR}/Pike-v${MY_PV}
 
 # Ignore QA warnings about missing prototypes for functions
@@ -103,9 +106,6 @@ src_compile() {
 	local myconf=""
 	# ffmpeg is broken atm #110136
 	myconf="${myconf} --without-_Ffmpeg"
-	# on hardened, disable runtime-generated code
-	# otherwise let configure work it out for itself
-	use hardened && myconf="${myconf} --without-machine-code"
 
 	make \
 		CONFIGUREARGS=" \
